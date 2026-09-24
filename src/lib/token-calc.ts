@@ -318,6 +318,11 @@ export interface CalcInput {
   cacheHitRate?: number;                       // 0–1 fraction of requests that hit the cache
   cacheTTL?: CacheTTL;                        // "none" | "5m" | "1h"
   cacheProvider?: "self-hosted" | "anthropic" | "openai";
+  // === Engine-aware presets ===
+  engineId?: string;          // "vllm" | "sglang" | "trtllm" | "llamacpp" | "generic"
+                               // When set, UI passes engine-specific effMem/effCompute
+  effMem?: number;             // Engine-specific memory bandwidth utilization (overrides ETA_MEM)
+  effCompute?: number;         // Engine-specific compute utilization (overrides ETA_COMPUTE)
 }
 
 export interface CalcResult {
@@ -409,11 +414,18 @@ export function calculate(input: CalcInput): CalcResult {
     ? (input.continuousBatchingMultiplier ?? DEFAULT_BATCHING_MULTIPLIER)
     : 1.0;
 
-  // Aggregate bandwidth across TP GPUs
-  const effectiveBandwidthGbps = gpu.memBandwidthGbps * tp * ETA_MEM * multiGpuEfficiency;
+  // Engine-aware efficiency factors: if effMem/effCompute are provided in input
+  // (set by the UI based on selected engine), use those instead of global defaults.
+  // This makes tokcalc engine-aware — vLLM, SGLang, TRT-LLM, llama.cpp all have
+  // different real-world utilization due to kernel optimizations and scheduler design.
+  const effMem = input.effMem ?? ETA_MEM;
+  const effCompute = input.effCompute ?? ETA_COMPUTE;
+
+  // Aggregate bandwidth across TP GPUs (uses engine-specific effMem if provided)
+  const effectiveBandwidthGbps = gpu.memBandwidthGbps * tp * effMem * multiGpuEfficiency;
   // Some accelerators (B200/B300) don't publish dense FP16 — fall back to ~2.5x FP8 as conservative estimate.
   const gpuFlops = gpu.flopsTflops ?? 1500;  // conservative fallback if null
-  const effectiveFlopsTflops = gpuFlops * tp * ETA_COMPUTE;
+  const effectiveFlopsTflops = gpuFlops * tp * effCompute;
 
   // ---- KV cache ----
   // KV cache per token = 2 (K&V) × layers × kvHeads × headDim × 2 bytes (FP16)

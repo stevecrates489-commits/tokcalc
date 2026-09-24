@@ -35,6 +35,7 @@ export interface CalcTabState {
   cacheHitRate: number;
   cacheTTL: string;
   cacheProvider: string;
+  engineId?: string;
 }
 
 /** Build-vs-Buy tab state — shape mirrors BuildVsBuyTab useState vars */
@@ -91,6 +92,7 @@ export function parseUrlHash(hash: string): {
         cacheHitRate: numOrUndef(params.get("ch")),
         cacheTTL: params.get("ct") ?? undefined,
         cacheProvider: params.get("cpr") ?? undefined,
+        engineId: params.get("e") ?? undefined,
       } as Partial<CalcTabState>,
     };
   }
@@ -139,6 +141,7 @@ export function serializeCalcState(s: CalcTabState): string {
     if (s.cacheTTL !== "5m") p.set("ct", s.cacheTTL);
     if (s.cacheProvider !== "self-hosted") p.set("cpr", s.cacheProvider);
   }
+  if (s.engineId && s.engineId !== "generic") p.set("e", s.engineId);
   return p.toString();
 }
 

@@ -17,14 +17,17 @@ import {
   Info,
   BookOpen,
   HelpCircle,
+  FileText,
 } from "lucide-react";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { ConfidenceDot, ConfidenceBadge, ConfidenceLegend } from "@/components/confidence-badge";
 import { BenchmarkImport } from "@/components/benchmark-import";
 import { AzureLivePricing } from "@/components/azure-live-pricing";
 import { VastAiLivePricing } from "@/components/vast-ai-live-pricing";
+import { LivePricingComparison } from "@/components/live-pricing-comparison";
 import type { Confidence } from "@/lib/token-calc";
 import { track } from "@/lib/track";
+import { ENGINE_PRESETS, getEngine, getSupportedQuants, type EngineId } from "@/lib/engine-presets";
 import {
   Bar,
   BarChart,
@@ -177,6 +180,23 @@ export default function Home() {
   const [cacheHitRate, setCacheHitRate] = useState(0);
   const [cacheTTL, setCacheTTL] = useState<CacheTTL>("5m");
   const [cacheProvider, setCacheProvider] = useState<"self-hosted" | "anthropic" | "openai">("self-hosted");
+  // === Engine selection ===
+  const [engineId, setEngineId] = useState<EngineId>("generic");
+  const selectedEngine = getEngine(engineId);
+
+  // Auto-switch quantization if current one isn't supported by the selected engine
+  useEffect(() => {
+    if (engineId === "generic") return; // Generic supports everything
+    const supported = getSupportedQuants(engineId);
+    if (!supported.includes(quantization)) {
+      // Switch to FP16 (supported by all engines) or first available
+      if (supported.includes("fp16")) {
+        setQuantization("fp16");
+      } else {
+        setQuantization(supported[0]);
+      }
+    }
+  }, [engineId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // === URL-share state (Phase A) ===
   // Track whether we've restored state from URL — prevents the write effect
@@ -216,6 +236,7 @@ export default function Home() {
         if (typeof stored.cacheHitRate === "number") setCacheHitRate(stored.cacheHitRate);
         if (stored.cacheTTL) setCacheTTL(stored.cacheTTL as CacheTTL);
         if (stored.cacheProvider) setCacheProvider(stored.cacheProvider as "self-hosted" | "anthropic" | "openai");
+        if (stored.engineId) setEngineId(stored.engineId as EngineId);
       }
       setUrlRestored(true);
       return;
@@ -245,6 +266,7 @@ export default function Home() {
       if (typeof c.cacheHitRate === "number") setCacheHitRate(c.cacheHitRate);
       if (c.cacheTTL) setCacheTTL(c.cacheTTL as CacheTTL);
       if (c.cacheProvider) setCacheProvider(c.cacheProvider as "self-hosted" | "anthropic" | "openai");
+      if (c.engineId) setEngineId(c.engineId as EngineId);
     }
     setUrlRestored(true);
     /* eslint-enable react-hooks/set-state-in-effect */
@@ -259,6 +281,7 @@ export default function Home() {
       useSpeculative, speculativeBoost,
       useContinuousBatching, continuousBatchingMultiplier,
       reasoningTokens, cachePrefixTokens, cacheHitRate, cacheTTL, cacheProvider,
+      engineId,
     };
     if (activeTab === "calculator") {
       writeUrlHash(serializeCalcState(state));
@@ -270,8 +293,8 @@ export default function Home() {
     gpuHourlyCost, useSpeculative, speculativeBoost, useContinuousBatching,
     continuousBatchingMultiplier, reasoningTokens, cachePrefixTokens, cacheHitRate,
     cacheTTL, cacheProvider,
+    engineId,
   ]);
-
   // ---- Share button handler ----
   const handleShare = async () => {
     // Track: high-signal event — user found something worth sharing
@@ -285,6 +308,7 @@ export default function Home() {
         useSpeculative, speculativeBoost,
         useContinuousBatching, continuousBatchingMultiplier,
         reasoningTokens, cachePrefixTokens, cacheHitRate, cacheTTL, cacheProvider,
+        engineId,
       };
       writeUrlHash(serializeCalcState(state));
     }
@@ -321,6 +345,65 @@ export default function Home() {
     }
   };
 
+  // ---- Copy as Markdown handler ----
+  const handleCopyMarkdown = async () => {
+    track("copied_markdown", { tab: activeTab });
+    const md = generateMarkdown();
+    try {
+      await navigator.clipboard.writeText(md);
+      toast({ title: "Markdown copied", description: "Paste into GitHub issues, Slack, Notion, or blog posts." });
+    } catch {
+      try {
+        const el = document.createElement("textarea");
+        el.value = md;
+        document.body.appendChild(el);
+        el.select();
+        document.execCommand("copy");
+        document.body.removeChild(el);
+        toast({ title: "Markdown copied", description: "Paste into GitHub issues, Slack, Notion, or blog posts." });
+      } catch {
+        toast({ title: "Couldn't copy", description: "Copy manually from the address bar." });
+      }
+    }
+  };
+
+  // Generate markdown table of current results
+  function generateMarkdown(): string {
+    const lines: string[] = [];
+    lines.push(`## tokcalc — ${selectedModel.name} on ${selectedGpu.name}`);
+    lines.push("");
+    lines.push(`| Metric | Value |`);
+    lines.push(`|---|---|`);
+    lines.push(`| **Model** | ${selectedModel.name} (${selectedModel.paramsB}B params, ${selectedModel.activeParamsB}B active) |`);
+    lines.push(`| **GPU** | ${numGpus}× ${selectedGpu.name} (${selectedGpu.vramGb * numGpus} GB total) |`);
+    lines.push(`| **Quantization** | ${selectedQuant.label} (${selectedQuant.bytesPerParam * 8}-bit) |`);
+    lines.push(`| **Engine** | ${selectedEngine.name} |`);
+    lines.push(`| **Context** | ${promptTokens + (cachePrefixTokens ?? 0)} tokens |`);
+    lines.push(`| **Batch size** | ${batchSize} |`);
+    if (useContinuousBatching) {
+      lines.push(`| **Continuous batching** | ${continuousBatchingMultiplier.toFixed(1)}× multiplier |`);
+    }
+    if (reasoningTokens > 0) {
+      lines.push(`| **Reasoning tokens** | ${reasoningTokens} (hidden) |`);
+    }
+    lines.push(`| **Generation speed** | ${fmtTokens(result.decodeTokensPerSec)} tok/s (1 user) |`);
+    lines.push(`| **Total throughput** | ${fmtTokens(result.aggregateTokensPerSec)} tok/s (${batchSize} users) |`);
+    lines.push(`| **TTFT** | ${fmtMs(result.ttftMs)} |`);
+    lines.push(`| **ITL** | ${fmtMs(result.itlMs)} per token |`);
+    lines.push(`| **Total latency** | ${fmtMs(result.totalLatencyMs)} |`);
+    lines.push(`| **Model size** | ${fmtBytes(result.modelSizeGb)} |`);
+    lines.push(`| **KV cache** | ${fmtBytes(result.kvCacheTotalGb)} |`);
+    lines.push(`| **VRAM used** | ${((result.totalVramNeededGb / (selectedGpu.vramGb * numGpus)) * 100).toFixed(1)}% (${fmtBytes(result.totalVramNeededGb)} / ${selectedGpu.vramGb * numGpus} GB) |`);
+    lines.push(`| **Topology** | ${topologyRec.topology} |`);
+    lines.push(`| **GPU cost** | ${fmtMoney(result.costPerHour)}/hr |`);
+    lines.push(`| **Cost per 1M tokens** | ${fmtMoney(result.costPerMillionOutputTokens)} |`);
+    lines.push(`| **Cost per request** | ${fmtMoney(result.costPerRequest)} |`);
+    lines.push("");
+    lines.push(`> Generated by [tokcalc](https://tokcalc.vercel.app) — open-source LLM serving capacity planner.`);
+    lines.push(`> [Try this configuration](${typeof window !== "undefined" ? window.location.href : "https://tokcalc.vercel.app"})`);
+    return lines.join("\n");
+  }
+
   const input: CalcInput = {
     modelId,
     gpuId,
@@ -339,6 +422,9 @@ export default function Home() {
     cacheHitRate,
     cacheTTL,
     cacheProvider,
+    engineId,
+    effMem: selectedEngine.etaMem,
+    effCompute: selectedEngine.etaCompute,
   };
 
   const result = useMemo(() => calculate(input), [
@@ -346,6 +432,7 @@ export default function Home() {
     outputTokens, gpuHourlyCost, useSpeculative, speculativeBoost,
     useContinuousBatching, continuousBatchingMultiplier, reasoningTokens,
     cachePrefixTokens, cacheHitRate, cacheTTL, cacheProvider,
+    engineId, selectedEngine.etaMem, selectedEngine.etaCompute,
   ]);
 
   // Chart data — vary batch size from 1 to 32
@@ -468,6 +555,16 @@ export default function Home() {
                   <span className="text-xs hidden sm:inline">Share</span>
                 </>
               )}
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleCopyMarkdown}
+              className="gap-1.5 h-8"
+              aria-label="Copy results as Markdown"
+            >
+              <FileText className="size-3.5" />
+              <span className="text-xs hidden sm:inline">Markdown</span>
             </Button>
             <ThemeToggle />
           </div>
@@ -681,6 +778,62 @@ export default function Home() {
                       className="w-full"
                     />
                   </div>
+
+                  {/* Engine selection */}
+                  <div className="pt-2">
+                    <Label className="text-xs">Inference engine</Label>
+                    <Select
+                      value={engineId}
+                      onValueChange={(v) => {
+                        setEngineId(v as EngineId);
+                        track("selected_engine", { engine: v });
+                        // Auto-enable continuous batching if engine has it on by default
+                        const engine = getEngine(v as EngineId);
+                        if (engine.batchingOnByDefault && !useContinuousBatching) {
+                          setUseContinuousBatching(true);
+                          setContinuousBatchingMultiplier(engine.defaultBatchingMultiplier);
+                        }
+                        if (!engine.batchingOnByDefault && useContinuousBatching && v !== "generic") {
+                          setUseContinuousBatching(false);
+                        }
+                      }}
+                    >
+                      <SelectTrigger className="w-full mt-1">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {ENGINE_PRESETS.map((e) => (
+                          <SelectItem key={e.id} value={e.id}>
+                            <span className="flex items-center gap-2">
+                              <span className="font-medium">{e.name}</span>
+                              <span className="text-[10px] text-muted-foreground">
+                                η_mem={e.etaMem} · η_comp={e.etaCompute}
+                              </span>
+                            </span>
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    {engineId !== "generic" && (
+                      <p className="text-[10px] text-muted-foreground mt-1.5 leading-relaxed">
+                        {selectedEngine.notes}
+                      </p>
+                    )}
+                    {engineId !== "generic" && selectedEngine.features.length > 0 && (
+                      <div className="flex flex-wrap gap-1 mt-1.5">
+                        {selectedEngine.features.slice(0, 4).map((f, i) => (
+                          <Badge key={i} variant="outline" className="text-[9px] px-1 py-0 h-3.5">
+                            {f}
+                          </Badge>
+                        ))}
+                        {selectedEngine.features.length > 4 && (
+                          <Badge variant="outline" className="text-[9px] px-1 py-0 h-3.5">
+                            +{selectedEngine.features.length - 4} more
+                          </Badge>
+                        )}
+                      </div>
+                    )}
+                  </div>
                 </CardContent>
               </Card>
 
@@ -696,24 +849,41 @@ export default function Home() {
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-3">
-                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
-                    {QUANTIZATIONS.map((q) => (
-                      <button
-                        key={q.id}
-                        onClick={() => setQuantization(q.id)}
-                        className={`text-xs px-2 py-1.5 rounded-md border transition-colors text-left ${
-                          quantization === q.id
-                            ? "border-emerald-500 bg-emerald-500/10 text-foreground"
-                            : "border-border hover:border-border/80 hover:bg-muted"
-                        }`}
-                      >
-                        <div className="font-medium">{q.label}</div>
-                        <div className="text-[10px] text-muted-foreground mt-0.5">
-                          {q.bytesPerParam * 8}-bit
+                  {/* Filter quantizations based on selected engine */}
+                  {(() => {
+                    const supportedQuants = getSupportedQuants(engineId);
+                    const filtered = QUANTIZATIONS.filter(q => supportedQuants.includes(q.id));
+                    const hiddenCount = QUANTIZATIONS.length - filtered.length;
+                    return (
+                      <>
+                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
+                          {filtered.map((q) => (
+                            <button
+                              key={q.id}
+                              onClick={() => setQuantization(q.id)}
+                              className={`text-xs px-2 py-1.5 rounded-md border transition-colors text-left ${
+                                quantization === q.id
+                                  ? "border-emerald-500 bg-emerald-500/10 text-foreground"
+                                  : "border-border hover:border-border/80 hover:bg-muted"
+                              }`}
+                            >
+                              <div className="font-medium">{q.label}</div>
+                              <div className="text-[10px] text-muted-foreground mt-0.5">
+                                {q.bytesPerParam * 8}-bit
+                              </div>
+                            </button>
+                          ))}
                         </div>
-                      </button>
-                    ))}
-                  </div>
+                        {engineId !== "generic" && hiddenCount > 0 && (
+                          <p className="text-[10px] text-muted-foreground flex items-center gap-1">
+                            <Info className="size-3 text-amber-500" />
+                            {hiddenCount} format{hiddenCount > 1 ? "s" : ""} hidden — not supported by {selectedEngine.name}.
+                            {" "}Select <button onClick={() => setEngineId("generic")} className="text-emerald-500 hover:underline">Generic</button> to see all.
+                          </p>
+                        )}
+                      </>
+                    );
+                  })()}
                   <p className="text-[11px] text-muted-foreground leading-relaxed">
                     {selectedQuant.description}
                   </p>
@@ -2444,10 +2614,13 @@ function ReferenceTab() {
 
       {subview === "cloud" && (
         <>
-          {/* Live Azure prices (fetched from Azure Retail Prices API) */}
+          {/* Unified live comparison across all providers */}
+          <LivePricingComparison />
+
+          {/* Detail: Azure live prices */}
           <AzureLivePricing />
 
-          {/* Vast.ai marketplace spot prices */}
+          {/* Detail: Vast.ai marketplace spot prices */}
           <VastAiLivePricing />
 
           {/* Static estimates from tokcalc catalog */}
