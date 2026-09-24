@@ -1,0 +1,51 @@
+{
+  "name": "tokcalc — LLM serving capacity planner",
+  "short_name": "tokcalc",
+  "description": "Plan your LLM deployment before you rent the GPUs. Open-source capacity planner: model fit, KV-cache, throughput, latency, multi-GPU scaling, cost — with transparent formulas.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0a0e0a",
+  "theme_color": "#0a0e0a",
+  "orientation": "any",
+  "categories": ["developer", "productivity", "utilities"],
+  "icons": [
+    {
+      "src": "/og-icon-256.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/og-icon-256.png",
+      "sizes": "256x256",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/og-icon-256.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Calculator",
+      "short_name": "Calc",
+      "description": "Open the LLM capacity calculator",
+      "url": "/#t=calculator"
+    },
+    {
+      "name": "Build vs Buy",
+      "short_name": "BvB",
+      "description": "Compare self-hosting to API pricing",
+      "url": "/#t=build-vs-buy"
+    },
+    {
+      "name": "Reference catalog",
+      "short_name": "Ref",
+      "description": "Browse all models, GPUs, and quantization formats",
+      "url": "/#t=reference"
+    }
+  ]
+}
