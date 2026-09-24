@@ -21,6 +21,7 @@ import {
 import { ThemeToggle } from "@/components/theme-toggle";
 import { ConfidenceDot, ConfidenceBadge, ConfidenceLegend } from "@/components/confidence-badge";
 import { BenchmarkImport } from "@/components/benchmark-import";
+import { AzureLivePricing } from "@/components/azure-live-pricing";
 import type { Confidence } from "@/lib/token-calc";
 import { track } from "@/lib/track";
 import {
@@ -2441,44 +2442,51 @@ function ReferenceTab() {
       )}
 
       {subview === "cloud" && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-sm">Cloud GPU pricing ($/hr, 2026 estimates)</CardTitle>
-            <CardDescription className="text-xs">
-              Approximate on-demand rates from research brief. Prices vary by region, commitment, and availability.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="p-0">
-            <div className="overflow-x-auto">
-              <table className="w-full text-xs">
-                <thead className="bg-muted/40 text-[10px] uppercase">
-                  <tr>
-                    <th className="text-left px-3 py-2">GPU</th>
-                    <th className="text-left px-3 py-2">Vendor</th>
-                    <th className="text-right px-3 py-2">$/hr (default)</th>
-                    <th className="text-left px-3 py-2">Typical providers</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {GPUS.filter(g => g.usdPerHour !== null && g.usdPerHour > 0).map(g => (
-                    <tr key={g.id} className="border-t border-border/40 hover:bg-muted/20">
-                      <td className="px-3 py-1.5 font-medium">{g.name}</td>
-                      <td className="px-3 py-1.5 text-muted-foreground">{g.vendor}</td>
-                      <td className="px-3 py-1.5 text-right font-mono">${g.usdPerHour}</td>
-                      <td className="px-3 py-1.5 text-muted-foreground text-[10px]">
-                        {g.category === "datacenter" && "RunPod · Lambda · CoreWeave · AWS · GCP"}
-                        {g.category === "workstation" && "TensorDock · RunPod"}
-                        {g.category === "consumer" && "Vast.ai · TensorDock (spot)"}
-                        {g.category === "tpu" && "Google Cloud TPU"}
-                        {g.category === "legacy" && "Secondary market"}
-                      </td>
+        <>
+          {/* Live Azure prices (fetched from Azure Retail Prices API) */}
+          <AzureLivePricing />
+
+          {/* Static estimates from tokcalc catalog */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-sm">Static estimates (from research catalog)</CardTitle>
+              <CardDescription className="text-xs">
+                Approximate on-demand rates from research brief. Prices vary by region, commitment, and availability.
+                Live Azure prices shown above.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="p-0">
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead className="bg-muted/40 text-[10px] uppercase">
+                    <tr>
+                      <th className="text-left px-3 py-2">GPU</th>
+                      <th className="text-left px-3 py-2">Vendor</th>
+                      <th className="text-right px-3 py-2">$/hr (default)</th>
+                      <th className="text-left px-3 py-2">Typical providers</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </CardContent>
-        </Card>
+                  </thead>
+                  <tbody>
+                    {GPUS.filter(g => g.usdPerHour !== null && g.usdPerHour > 0).map(g => (
+                      <tr key={g.id} className="border-t border-border/40 hover:bg-muted/20">
+                        <td className="px-3 py-1.5 font-medium">{g.name}</td>
+                        <td className="px-3 py-1.5 text-muted-foreground">{g.vendor}</td>
+                        <td className="px-3 py-1.5 text-right font-mono">${g.usdPerHour}</td>
+                        <td className="px-3 py-1.5 text-muted-foreground text-[10px]">
+                          {g.category === "datacenter" && "RunPod · Lambda · CoreWeave · AWS · GCP"}
+                          {g.category === "workstation" && "TensorDock · RunPod"}
+                          {g.category === "consumer" && "Vast.ai · TensorDock (spot)"}
+                          {g.category === "tpu" && "Google Cloud TPU"}
+                          {g.category === "legacy" && "Secondary market"}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </CardContent>
+          </Card>
+        </>
       )}
     </div>
   );
