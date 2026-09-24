@@ -20,6 +20,7 @@ import {
 } from "lucide-react";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { ConfidenceDot, ConfidenceBadge, ConfidenceLegend } from "@/components/confidence-badge";
+import { BenchmarkImport } from "@/components/benchmark-import";
 import type { Confidence } from "@/lib/token-calc";
 import { track } from "@/lib/track";
 import {
@@ -1484,6 +1485,13 @@ export default function Home() {
                   </div>
                 </CardContent>
               </Card>
+
+              {/* ===== Benchmark Import — calibrate the formula against real data ===== */}
+              <BenchmarkImport
+                estimate={result}
+                modelName={selectedModel.name}
+                gpuName={selectedGpu.name}
+              />
             </div>
           </div>
             </>
