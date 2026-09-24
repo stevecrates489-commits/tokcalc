@@ -1,0 +1,686 @@
+# Research scope note
+
+Your requested scope is broad enough to be a small data product: hundreds of model, accelerator, quantization, and price records—many of which are volatile, unavailable, proprietary, or not meaningfully comparable. The most useful implementation decision is therefore **not** to hard-code a giant static matrix, but to build tokcalc around versioned data adapters, confidence labels, and workload-specific calculators.
+
+Also, several requested names are not valid current public model/hardware product families or do not expose the architectural data required for local-inference math:
+
+- **Llama 4 Behemoth** was announced as a teacher model / not broadly released, so exact deployable weights/configuration should not be presented as a selectable local model without an official artifact.
+- **OpenAI o1/o3-mini, Claude Thinking, Gemini Flash Thinking** are closed APIs; token pricing can be modeled, but layer count, hidden size, KV heads, and FLOPs cannot be reliably modeled.
+- **“Llama 4 Vision”** is not a separate official model name in the way Qwen-VL or Pixtral are; multimodal capability needs to be represented per official model/config.
+- **M4 Ultra** has not been a normal shipping Apple SKU in the same way M2 Ultra/M3 Ultra configurations have been; do not add it as available hardware until Apple publishes it.
+- **V3.5 / R2** should not be assumed to exist solely because a model vendor has earlier V3/R1 naming.
+- GPU rental pricing is market-, region-, commitment-, and instance-size-specific, particularly on Vast.ai and spot-like products. Store observations with timestamp, region, availability, billing granularity, and source URL rather than a single “truth” value.
+
+The recommendations below are optimized for what tokcalc can calculate transparently and defensibly.
+
+# SECTION A — TRENDING FEATURES (Sept 2025 - 2026)
+
+## 1. Continuous batching and paged attention
+
+| Item | Recommendation |
+|---|---|
+| What it is | Continuous batching admits and retires requests at token-generation boundaries instead of waiting for every request in a fixed batch to finish; paged attention stores KV-cache blocks non-contiguously, reducing fragmentation and raising usable cache capacity. |
+| Why users want it | This is the difference between a toy “batch size × tokens/sec” estimate and production serving. Under concurrent mixed-length requests, static batching leaves GPU work idle or makes short requests wait for long ones. Published vLLM material describes large throughput gains over naïve Hugging Face generation—often cited as roughly **2–24×**, depending on model, request mix, latency target, and baseline. [vLLM paper](https://arxiv.org/abs/2309.06180) |
+| Calculator inputs | Request arrival rate, prompt-length distribution, output-length distribution, maximum concurrent sequences, KV-block size, GPU memory utilization target, scheduler type, TTFT target, inter-token latency target. |
+| Implementation | Model a queue simulator rather than one static formula. Start with selectable scheduler presets: “naïve static batch,” “continuous batching,” and “continuous batching + paged KV.” Output admitted concurrency, KV-cache capacity, aggregate output tok/s, TTFT estimate, and P50/P95 queue wait. |
+| Complexity | **High** — ~40–80 hours for a useful transparent approximation; significantly more for a trace-driven discrete-event simulator. |
+| Priority | **Must-have** |
+
+**Implementation-ready approximation**
+
+```ts
+type SchedulerMode =
+  | "static_batch"
+  | "continuous_batch"
+  | "continuous_paged";
+
+effectiveConcurrency =
+  min(
+    requestedConcurrency,
+    floor(availableKvBytes / kvBytesPerRequestAtTargetLength),
+  );
+
+aggregateTokPerSec =
+  baseDecodeTokPerSec *
+  schedulerEfficiency[mode] *
+  concurrencyEfficiency(effectiveConcurrency, model, gpu);
+
+queueDelay =
+  estimateQueueDelay(arrivalRate, requestServiceTime, effectiveConcurrency);
+```
+
+Do not expose “2–24×” as a universal multiplier. Present it as a **benchmark-derived range**, then show the selected multiplier and assumptions. Recent serving guidance commonly describes **2–4×** gains versus static batching in high-concurrency mixed-output settings, while the larger vLLM comparison figures depend heavily on the naïve baseline and workload. [vLLM paper](https://arxiv.org/abs/2309.06180) [RunPod vLLM overview](https://www.runpod.io/articles/guides/vllm-pagedattention-continuous-batching)
+
+## 2. Prefix and prompt caching
+
+| Item | Recommendation |
+|---|---|
+| What it is | Prefix/prompt caching reuses the computation and/or KV cache for a repeated prompt prefix—such as a system prompt, RAG corpus header, coding repository context, or shared chat history—rather than prefilling it again for every request. |
+| Why users want it | It can sharply reduce time-to-first-token, prefill compute, GPU memory traffic, and API bills when prompts share long prefixes. Anthropic’s documented prompt-cache reads are priced at **10% of base input-token price**; its 5-minute cache writes cost **1.25×** base input and one-hour writes cost **2×** base input. [Anthropic prompt caching](https://docs.anthropic.com/en/docs/build-with-claude/prompt-caching) |
+| OpenAI behavior | OpenAI prompt caching is automatic for supported models and matching prefixes; its pricing tables distinguish ordinary input from cached input. Treat eligibility, minimum prompt size, and supported model set as provider-configurable metadata because they change. [OpenAI prompt caching](https://platform.openai.com/docs/guides/prompt-caching) |
+| Calculator inputs | Shared-prefix tokens, cache hit rate, TTL, cache-write multiplier, cached-read multiplier, number of requests, normal input price, local prefill tok/s, and KV-cache residency. |
+| Implementation | Add a “Shared Prefix / Cache” panel: prefix size, hit rate, TTL, request count, provider mode (self-hosted/OpenAI/Anthropic/Gemini), and cache policy. Show cost avoided, prefill FLOPs avoided, saved TTFT, and cache break-even hit rate. |
+| Complexity | **Medium** — ~16–30 hours. |
+| Priority | **Must-have** |
+
+**Useful equations**
+
+\[
+\text{API input cost} =
+N \cdot \left[
+(1-h) \cdot T_p \cdot P_{\text{write}}
++
+h \cdot T_p \cdot P_{\text{read}}
++
+T_u \cdot P_{\text{input}}
+\right]
+\]
+
+Where \(N\) is request count, \(h\) is cache-hit rate, \(T_p\) is reusable prefix tokens, and \(T_u\) is uncached input tokens.
+
+For self-hosting, show:
+
+\[
+\text{prefill tokens avoided} = N \cdot h \cdot T_p
+\]
+
+Anthropic documents cache-read pricing at 0.1× base input; consequently, a cache hit can represent a **90% reduction for those cached input tokens**, though the total request saving depends on how much of the request is cached. [Anthropic prompt caching](https://docs.anthropic.com/en/docs/build-with-claude/prompt-caching)
+
+## 3. Chunked prefill
+
+| Item | Recommendation |
+|---|---|
+| What it is | Chunked prefill breaks a long prompt’s prefill work into token chunks and interleaves that work with decode steps for active requests. |
+| Why users want it | A very long prompt can otherwise monopolize the GPU and harm inter-token latency for users who are already receiving generated output. Chunking improves fairness and tail latency rather than magically increasing every workload’s raw model throughput. |
+| Implementation | Add `prefillChunkTokens`, toggle “prioritize decode,” and a chart that shows the TTFT vs inter-token-latency trade-off. Make it clear that chunking shifts scheduling behavior and may slightly reduce prefill efficiency. |
+| Complexity | **Medium** — ~20–40 hours as part of the queue/scheduler model. |
+| Priority | **Must-have** once continuous batching exists. |
+
+vLLM documents chunked prefill as a scheduler feature that allows prefills to be chunked and scheduled alongside decode work; it is especially useful in mixed prompt-length and latency-sensitive serving. [vLLM optimization guide](https://docs.vllm.ai/en/latest/configuration/optimization/)
+
+## 4. Prefill/decode disaggregation
+
+| Item | Recommendation |
+|---|---|
+| What it is | PD disaggregation assigns prompt-prefill and autoregressive decode to separate GPU pools, connected by KV-cache transfer, because their bottlenecks and scaling behavior differ. |
+| Why users want it | Prefill is generally compute-heavy and bursty; decode is memory-bandwidth- and latency-sensitive. Separating them helps operators independently scale TTFT capacity and sustained generation capacity instead of overprovisioning one mixed fleet. |
+| Who uses it | This architecture is actively explored and implemented in production-oriented serving systems and research, including SGLang and vLLM ecosystem work; it is a central serving direction rather than a universally necessary default. [SGLang PD disaggregation docs](https://docs.sglang.ai/advanced_features/pd_disaggregation.html) [DistServe paper](https://arxiv.org/abs/2401.09670) |
+| Throughput gain | Do **not** bake in one multiplier. Gains depend on workload mix, request skew, cache-transfer cost, network fabric, and the degree to which the monolithic fleet was imbalanced. Calculate fleet utilization and SLO capacity instead. |
+| Implementation | Create a dual-pool calculator: number/type of prefill GPUs, number/type of decode GPUs, NIC bandwidth, KV-transfer bytes/request, prompt/output distributions, and SLOs. Return bottleneck, required replicas, capacity, cost/request, and required network throughput. |
+| Complexity | **High** — ~60–120 hours for a credible planning calculator. |
+| Priority | **Future**, but begin designing the schema now. |
+
+A useful first-order KV-transfer estimate is:
+
+\[
+\text{KV bytes transferred} =
+2 \cdot L \cdot T_{\text{prompt}} \cdot H_{\text{kv}} \cdot D_h \cdot B_{\text{KV}}
+\]
+
+where \(L\) is layers, \(T_{\text{prompt}}\) is prompt length, \(H_{\text{kv}}\) is KV-head count, \(D_h\) is head dimension, and \(B_{\text{KV}}\) is bytes per KV value.
+
+## 5. Multi-LoRA serving
+
+| Item | Recommendation |
+|---|---|
+| What it is | Multi-LoRA serving hosts one shared base model while dynamically applying many small low-rank adapters for tenants, customers, domains, or tasks. |
+| Why users want it | It avoids loading or duplicating an entire base model for every fine-tune, making multi-tenant customization much cheaper and denser. Punica and S-LoRA specifically target efficient serving of many LoRA adapters. [Punica](https://arxiv.org/abs/2310.18547) [S-LoRA](https://arxiv.org/abs/2311.03285) |
+| Throughput math | Adapter weight storage is roughly proportional to \(r(d_{in}+d_{out})\) per adapted matrix, times adapted modules and layers; runtime overhead depends on rank, batching mix, fused kernels, and adapter swapping/cache misses. It is not safely modeled by a single “LoRA = X% slower” constant. |
+| Implementation | Add a Multi-LoRA tab: base model, adapter rank, target modules, number of adapters resident, adapter cache size, adapter popularity distribution, concurrent adapter mix, and engine. Show adapter VRAM, estimated cache-miss risk, and a throughput-overhead range. |
+| Complexity | **Medium** — ~24–50 hours. |
+| Priority | **Nice** |
+
+## 6. Reasoning-model workloads
+
+| Item | Recommendation |
+|---|---|
+| What it is | Reasoning-oriented models often spend substantially more generated tokens on hidden or visible deliberation, tool use, verification, and retries before producing a concise final response. |
+| Why users want it | A calculator based only on user-visible output underestimates GPU time, API costs, queue time, and latency for reasoning applications. |
+| Implementation | Add “reasoning multiplier” and “hidden reasoning-token budget” as explicit workload inputs rather than assigning undocumented internal-token assumptions to closed models. Support three presets: standard chat, bounded reasoning, and agentic reasoning. |
+| Complexity | **Low** — ~8–16 hours. |
+| Priority | **Must-have** |
+
+For closed systems, distinguish **billed output tokens**, **visible output tokens**, and **unknown provider-internal compute**. OpenAI pricing and model documentation should be treated as the source of record for billing behavior; do not infer architecture from observed latency. [OpenAI pricing](https://openai.com/api/pricing/)
+
+## 7. Agentic workloads
+
+| Item | Recommendation |
+|---|---|
+| What it is | Agentic systems perform multiple model calls interleaved with tool invocations, retrieval, state updates, retries, and growing conversation context. |
+| Why users want it | The cost and latency of an “answer” become a workflow total, not one request: a six-step tool-using agent can have six prefills, six decodes, tool latency, and repeated context. |
+| Implementation | Add an agent-workflow calculator with turns, average tool calls/turn, tool latency, retry rate, context growth/turn, cache hit rate, input/output tokens/call, and model routing. Report end-to-end latency decomposition and dollars per completed task. |
+| Complexity | **Medium** — ~20–40 hours. |
+| Priority | **Must-have** |
+
+## 8. Long-context serving
+
+| Item | Recommendation |
+|---|---|
+| What it is | Long-context serving processes prompts from 128K to 1M+ tokens, making prefill time, KV-cache memory, and distributed attention communication dominate far more than ordinary chat workloads. |
+| Why users want it | A model that “fits” in VRAM at 8K context may have very low concurrency or be infeasible at 128K because each live request retains a large KV cache. |
+| RingAttention / YaRN | Ring Attention distributes long-sequence attention across devices; YaRN is a context-window extension approach based on RoPE scaling. They solve different issues: distributed execution versus positional extrapolation/extension. [Ring Attention](https://arxiv.org/abs/2310.01889) [YaRN](https://arxiv.org/abs/2309.00071) |
+| Implementation | Promote context length from a simple input into a first-class workload distribution. Add KV-cache-by-context charts, maximum concurrency at 8K/32K/128K/256K/1M, prefill duration, and required TP/CP topology. |
+| Complexity | **High** — ~30–70 hours, much of it data/model validation. |
+| Priority | **Must-have** |
+
+For decoder-only transformers:
+
+\[
+\text{KV bytes/request} =
+2 \cdot L \cdot T \cdot H_{\text{kv}} \cdot D_h \cdot B
+\]
+
+This is the most important formula tokcalc should visibly expose. The factor of 2 stores both keys and values.
+
+## 9. Embeddings calculator
+
+| Item | Recommendation |
+|---|---|
+| What it is | An embeddings calculator estimates vectors/sec, documents/sec, tokens/sec, cost, and latency for encoder or embedding APIs rather than autoregressive generation. |
+| Why users want it | Embedding workloads are often high-batch, fixed-output, encoder-style jobs where decode-token metrics are irrelevant; RAG teams need ingestion and re-indexing capacity planning. |
+| Implementation | New mode: model, sequence length, batch size, embedding dimension, normalization, GPU, and target documents/day. Outputs throughput, GPU-hours, cost/M input tokens, index-vector storage, and vector-store egress estimate. |
+| Complexity | **Medium** — ~24–48 hours. |
+| Priority | **Must-have** |
+
+Separate “embedding throughput” from “generation throughput.” Models such as BGE-M3 are designed for multilingual and long-text retrieval use cases, while API embedding models bill input tokens without autoregressive output-token pricing. [BGE-M3 model card](https://huggingface.co/BAAI/bge-m3) [OpenAI embeddings guide](https://platform.openai.com/docs/guides/embeddings)
+
+## 10. Vision-language model serving
+
+| Item | Recommendation |
+|---|---|
+| What it is | Vision-language model inference converts images or video frames into visual embeddings/tokens that are combined with text context before generation. |
+| Why users want it | Image resolution, tiling, number of images, and video frames can dominate prompt length, memory use, and cost even when the typed text is short. |
+| Implementation | Add modality inputs: image width, height, count, tile strategy, patch size, vision-token count override, video frames, and image pricing mode. Report effective prompt tokens, vision-encoder cost, prefill cost, and total latency. |
+| Complexity | **High** — ~35–70 hours because tokenization rules vary by model. |
+| Priority | **Nice** |
+
+Do not use one universal “image = N tokens” constant. Model cards and provider docs define different image preprocessing, tiling, resolution, and token-equivalence rules. [Qwen2-VL model card](https://huggingface.co/Qwen/Qwen2-VL-72B-Instruct) [Pixtral 12B model card](https://huggingface.co/mistralai/Pixtral-12B-2409)
+
+## 11. Training and fine-tuning calculator
+
+| Item | Recommendation |
+|---|---|
+| What it is | A training calculator estimates memory, tokens/day, step time, GPU-hours, and cost for LoRA, QLoRA, full supervised fine-tuning, and possibly continued pretraining. |
+| Why users want it | Teams deciding whether to prompt, RAG, fine-tune, or self-host need training cost next to inference cost. LoRA reduces trainable parameters by introducing low-rank adapters, and QLoRA combines quantized base weights with adapters to reduce memory requirements. [LoRA paper](https://arxiv.org/abs/2106.09685) [QLoRA paper](https://arxiv.org/abs/2305.14314) |
+| Implementation | A separate calculator, not a mode bolted onto inference. Inputs: model architecture, sequence length, global batch, microbatch, precision, optimizer, activation checkpointing, ZeRO/FSDP level, LoRA rank, training tokens, GPU count. |
+| Complexity | **High** — ~60–120 hours. |
+| Priority | **Future** |
+
+## 12. Build-vs-buy calculator
+
+| Item | Recommendation |
+|---|---|
+| What it is | A build-vs-buy calculator compares self-hosted GPU capacity and operational overhead against token-priced API alternatives for the same workload. |
+| Why users want it | It answers the practical question: “At our utilization and prompt/output mix, when does renting GPUs beat an API?” |
+| Implementation | Take cloud GPU hourly price, usable aggregate tok/s, utilization, model/license, deployment overhead, prompt/output mix, cache hit rate, and API provider prices. Output break-even requests/day, cost/M input/output tokens, total monthly cost, and sensitivity ranges. |
+| Complexity | **Medium** — ~24–45 hours once pricing and throughput data are normalized. |
+| Priority | **Must-have** |
+
+Use a utilization-sensitive formula:
+
+\[
+\text{self-hosted cost per million generated tokens} =
+\frac{\text{GPU hourly price}}
+{3600 \cdot \text{effective output tok/s} \cdot \text{utilization}}
+\cdot 10^6
+\]
+
+The decisive term is **effective utilization**, not synthetic maximum throughput.
+
+## 13. Energy and carbon
+
+| Item | Recommendation |
+|---|---|
+| What it is | This estimates energy per request or per million tokens and converts it to location-dependent carbon emissions using a grid-emissions factor. |
+| Why users want it | Procurement, enterprise reporting, and capacity planning increasingly require cost plus environmental impact; energy also reflects operating cost and cooling load. |
+| Implementation | Inputs: GPU power draw or measured joules/token, PUE, utilization, region/grid intensity, and token counts. Output kWh/M tokens, kgCO₂e/M tokens, and uncertainty range. Use region-specific carbon data rather than a global constant. |
+| Complexity | **Medium** — ~16–32 hours. |
+| Priority | **Nice** |
+
+Use:
+
+\[
+\text{kWh/M tokens} =
+\frac{\text{average IT kW} \cdot \text{PUE}}
+{\text{effective tok/s} \cdot 3600}
+\cdot 10^6
+\]
+
+\[
+\text{kgCO}_2\text{e/M tokens} =
+\text{kWh/M tokens} \cdot \text{grid kgCO}_2\text{e/kWh}
+\]
+
+The Green Software Foundation’s SCI specification is a useful framing reference, but tokcalc should state that output is an estimate and disclose assumptions. [SCI Specification](https://sci.greensoftware.foundation/)
+
+## 14. Serverless cold starts
+
+| Item | Recommendation |
+|---|---|
+| What it is | Cold-start time is the delay to provision a worker, attach a GPU, pull/initialize the image and model, and become ready after a period of zero warm capacity. |
+| Why users want it | It determines whether serverless is appropriate for interactive traffic, bursty batch work, or only asynchronous jobs. |
+| Implementation | Add endpoint mode: warm, scale-to-zero, and provisioned minimum replicas. Inputs: model artifact size, download/cache state, GPU allocation time, container startup, engine initialization, and warm timeout. Report warm P50/P95 vs cold P50/P95 separately. |
+| Complexity | **Medium** — ~16–28 hours for a planning model; production figures require provider-specific measurements. |
+| Priority | **Nice** |
+
+Do not present a universal cold-start number: provider, region, image/model cache state, model size, concurrency configuration, and persistent volumes materially change it. Modal documents cold-start behavior and configuration as application-level concerns. [Modal performance guide](https://modal.com/docs/guide/cold-start)
+
+# SECTION B — MORE MODELS TO ADD
+
+## Data-model recommendation
+
+Store architectural records as versioned JSON, sourced from the model’s `config.json` where available, rather than manually maintained prose tables. A useful normalized schema is:
+
+```ts
+type ModelSpec = {
+  id: string;
+  officialName: string;
+  provider: string;
+  family: string;
+  modality: "text" | "vision-language" | "embedding" | "audio" | "closed-api";
+  status: "released" | "announced" | "unreleased" | "deprecated";
+  releaseDate?: string;
+  parametersTotalB?: number;
+  parametersActiveB?: number;
+  architecture?: {
+    numLayers?: number;
+    hiddenSize?: number;
+    numAttentionHeads?: number;
+    numKeyValueHeads?: number;
+    headDim?: number;
+    vocabSize?: number;
+    maxPositionEmbeddings?: number;
+    moeNumExperts?: number;
+    moeTopK?: number;
+  };
+  contextWindow?: number;
+  sourceUrls: string[];
+  confidence: "official-config" | "official-card" | "vendor-claim" | "estimated";
+};
+```
+
+For sparse MoE models, distinguish **total stored parameters** from **active parameters/token**. This matters for weight loading, VRAM, and throughput.
+
+## Recommended additions first
+
+| Model family / representative release | Deployment type | Why add | Architecture data source |
+|---|---:|---|---|
+| Llama 4 Scout / Maverick | Open-weight multimodal MoE | High user demand and current family relevance; model cards/configs should drive exact selectable variants rather than copied architecture claims. | [Meta Llama collection](https://huggingface.co/meta-llama) |
+| Qwen3 | Open-weight text / reasoning variants | Broad deployment use, multiple sizes, strong coding/reasoning interest. | [Qwen organization](https://huggingface.co/Qwen) |
+| Qwen2.5-VL / Qwen2-VL | Open-weight VLM | Needed for image-token-aware workload planning. | [Qwen2-VL collection](https://huggingface.co/collections/Qwen/qwen2-vl-66e81a666a0dbd6a8321d75b) |
+| DeepSeek-V3 / DeepSeek-R1 | Open-weight MoE / reasoning | Essential for MoE and reasoning workload modes. | [DeepSeek-V3](https://huggingface.co/deepseek-ai/DeepSeek-V3) / [DeepSeek-R1](https://huggingface.co/deepseek-ai/DeepSeek-R1) |
+| Mistral Large 2 | Open-weight / research license as applicable | Large dense model benchmark point, high deployment interest. | [Mistral Large Instruct 2411](https://huggingface.co/mistralai/Mistral-Large-Instruct-2411) |
+| Codestral / Devstral-class coding models | Code generation | Coding has distinct prompt lengths, tool loops, and output lengths. | [Mistral models](https://huggingface.co/mistralai) |
+| Pixtral 12B | Open-weight VLM | Establishes a practical image-input calculator benchmark. | [Pixtral 12B](https://huggingface.co/mistralai/Pixtral-12B-2409) |
+| Gemma 3 | Open-weight multimodal family | Widely used and a natural successor to Gemma 2. | [Google Gemma](https://huggingface.co/google) |
+| Phi-4 / Phi-3.5 | Small-model deployment | Important for edge, cost-sensitive, and CPU/consumer-GPU scenarios. | [Microsoft Phi collection](https://huggingface.co/microsoft) |
+| SmolLM2 | Small open models | Good low-end benchmark family. | [SmolLM2](https://huggingface.co/HuggingFaceTB/SmolLM2-1.7B-Instruct) |
+| Falcon 3 | Open models | Regional/community deployment interest. | [Falcon 3](https://huggingface.co/tiiuae/Falcon3-10B-Instruct) |
+| OLMo 2 | Fully open research model family | Strong fit for transparent benchmarking and reproducible configs. | [OLMo 2](https://huggingface.co/allenai/OLMo-2-1124-13B-Instruct) |
+| DeepSeek-Coder-V2 | MoE code model | Must-have for code-specific comparison. | [DeepSeek-Coder-V2](https://huggingface.co/deepseek-ai/DeepSeek-Coder-V2-Instruct) |
+| Qwen2.5-Coder | Code model family | Widely used local coding family. | [Qwen2.5-Coder](https://huggingface.co/Qwen/Qwen2.5-Coder-32B-Instruct) |
+| Code Llama | Older but still deployed | Add as “legacy / comparison” rather than a roadmap focus. | [Code Llama](https://huggingface.co/codellama) |
+| QwQ | Open reasoning family | Useful for reasoning-budget presets and comparison. | [QwQ](https://huggingface.co/Qwen) |
+| BGE-M3 | Embedding | Supports a dedicated embeddings mode, including multilingual retrieval. | [BGE-M3](https://huggingface.co/BAAI/bge-m3) |
+| multilingual-e5-large | Embedding | Standard baseline for retrieval workloads. | [multilingual-e5-large](https://huggingface.co/intfloat/multilingual-e5-large) |
+| GTE-large | Embedding | Widely used open retrieval baseline. | [gte-large](https://huggingface.co/thenlper/gte-large) |
+| Nomic Embed | Embedding | Popular long-context embedding option. | [Nomic Embed Text](https://huggingface.co/nomic-ai/nomic-embed-text-v1.5) |
+| Jina Embeddings v3 | Embedding | Multilingual/task-adapter embedding comparison. | [Jina Embeddings v3](https://huggingface.co/jinaai/jina-embeddings-v3) |
+| InternVL | VLM | Strong multimodal benchmark family. | [InternVL collection](https://huggingface.co/OpenGVLab) |
+| CogVLM2 | VLM | Add to compare open VLM architectures. | [CogVLM2](https://huggingface.co/THUDM/cogvlm2-llama3-chat-19B) |
+
+## Model-family treatment
+
+| Requested group | Tokcalc treatment | Priority | Notes |
+|---|---|---:|---|
+| Llama 4 Scout / Maverick / Behemoth | Add released public variants whose official config/model card is available; mark Behemoth as announced/unreleased unless a deployable official release appears | Must-have | Do not infer exact architecture from press reporting. [Meta Llama collection](https://huggingface.co/meta-llama) |
+| Qwen3, Qwen2.5-VL, Qwen MoE, Qwen Coder | Add as separate text, VLM, MoE, and coding categories | Must-have | Pull config fields automatically in CI. [Qwen organization](https://huggingface.co/Qwen) |
+| DeepSeek V3/R1 and newer | Add V3 and R1; only add a newer family when DeepSeek publishes official model/API documentation | Must-have | Never create speculative “V3.5” or “R2” records. [DeepSeek organization](https://huggingface.co/deepseek-ai) |
+| Mistral Large 2, Codestral, Ministral, Pixtral | Add dense, code, small, and vision workload profiles | Must-have | Pixtral belongs in VLM math, not just a text-model dropdown. [Mistral organization](https://huggingface.co/mistralai) |
+| Gemma 3 / Gemma 2 | Add current public released variants | Nice | Represent context and multimodal support per variant. [Google organization](https://huggingface.co/google) |
+| Phi-4 / Phi-3.5 | Add as efficient/small-model benchmarks | Nice | Relevant for laptop/edge comparisons. [Microsoft organization](https://huggingface.co/microsoft) |
+| WizardLM / Orca | Add only as legacy/reference, not primary roadmap | Future | Earlier families; source configs must still validate values. |
+| BitNet b1.58 | Add as experimental architecture / quantization scenario | Future | Do not claim broad production engine parity. [BitNet b1.58 paper](https://arxiv.org/abs/2402.17764) |
+| SmolLM2, TinyLlama, OLMo, Falcon 3, Yi 1.5, InternLM 2.5 | Create a “small/open/legacy” collection | Nice | Valuable for home-lab users and CPU/Apple scenarios. |
+| OpenAI o1-mini/o3-mini, Gemini Thinking | API-only cost and workflow profiles | Must-have | No local architectural throughput claims. |
+| OpenAI embeddings | API-cost-only embeddings records | Must-have | Use current official pricing and model docs. [OpenAI pricing](https://openai.com/api/pricing/) |
+| Whisper / Parakeet / Distil-Whisper | Separate ASR calculator | Nice | Use audio duration, realtime factor, batch size, and encoder/decoder architecture rather than LLM token/sec. |
+
+## Architecture-data pipeline
+
+Do not hand-fill every requested tuple of parameters, layers, hidden size, heads, KV heads, head dimension, vocabulary, and context. Build an ingestion script that:
+
+1. Fetches a Hugging Face model’s `config.json` and model card.
+2. Maps common field aliases such as `num_hidden_layers`, `hidden_size`, `num_attention_heads`, `num_key_value_heads`, `head_dim`, `vocab_size`, and `max_position_embeddings`.
+3. Saves raw config and normalized fields.
+4. Flags missing data for manual review.
+5. Pins revision SHA and retrieval date.
+6. Displays a source link and confidence badge in the UI.
+
+That makes your dataset maintainable and avoids stale copied values.
+
+# SECTION C — MORE GPU OPTIONS
+
+## Accelerator-data strategy
+
+The requested fields cannot be uniformly compared:
+
+- NVIDIA reports multiple tensor-performance modes: dense/sparse, FP16/BF16/FP8/FP4, sometimes per GPU and sometimes system-level.
+- Google TPUs, Groq LPUs, Cerebras systems, and SambaNova systems are not drop-in “GPU” equivalents. They need separate accelerator schemas and benchmark-based serving records.
+- Apple unified memory is system memory, not HBM VRAM, and practical inference bandwidth/thermal behavior differs.
+- GB200 NVL72 and GB300 are **rack-scale systems**, not individual GPUs; represent them as topology products with nodes, accelerator count, fabric, and system price.
+
+Use two tables:
+
+1. `accelerator_specs`: immutable vendor specifications.
+2. `rental_price_observations`: `provider`, `region`, `product`, `billing`, `price`, `timestamp`, `availability`, `source`.
+
+## Must-add accelerator rows
+
+| Product | Category | What tokcalc should model | Primary source |
+|---|---|---|---|
+| NVIDIA H200 | Datacenter GPU | HBM3e capacity/bandwidth, SXM vs PCIe form factor, NVLink topology | [NVIDIA H200](https://www.nvidia.com/en-us/data-center/h200/) |
+| NVIDIA B200 | Datacenter GPU | FP4/FP8/FP16 modes, HBM3e, GB200/NVL system topology | [NVIDIA Blackwell](https://www.nvidia.com/en-us/data-center/blackwell-architecture/) |
+| NVIDIA B300 / GB300 | New rack-scale / accelerator generation | Add only when official spec sheet and cloud offerings expose stable records | [NVIDIA data center products](https://www.nvidia.com/en-us/data-center/) |
+| NVIDIA RTX PRO 6000 Blackwell | Workstation GPU | VRAM, bandwidth, consumer/workstation inference economics | [NVIDIA RTX PRO](https://www.nvidia.com/en-us/design-visualization/rtx-pro/) |
+| RTX 5090 / 5080 | Consumer GPU | Local inference, PCIe constraints, power, VRAM | [NVIDIA GeForce RTX 50 series](https://www.nvidia.com/en-us/geforce/graphics-cards/50-series/) |
+| AMD MI300X | Datacenter GPU | HBM capacity/bandwidth, ROCm engine support, multi-GPU fabric | [AMD Instinct MI300X](https://www.amd.com/en/products/accelerators/instinct/mi300/mi300x.html) |
+| AMD MI325X / MI350 / MI355 | Datacenter GPU | Add released parts from official product datasheets; distinguish announced from available | [AMD Instinct](https://www.amd.com/en/products/accelerators/instinct.html) |
+| Intel Gaudi 2 / Gaudi 3 | AI accelerator | Separate engine support and Ethernet scale-out assumptions | [Intel Gaudi](https://www.intel.com/content/www/us/en/products/details/processors/ai-accelerators/gaudi.html) |
+| Google TPU v5e / v5p / Trillium | TPU | Pod/topology price and benchmark profile, not generic TFLOPS equivalence | [Google Cloud TPU](https://cloud.google.com/tpu/docs) |
+| Groq LPU | Hosted inference system | Published model-specific tokens/sec and token API pricing | [Groq pricing](https://groq.com/pricing/) |
+| Cerebras CS-3 / WSE-3 | Wafer-scale system | Model-specific latency/tokens/sec and API pricing where exposed | [Cerebras inference](https://www.cerebras.ai/inference) |
+| SambaNova RDU | Dataflow system | Model-specific throughput rather than GPU FLOPS equivalence | [SambaNova](https://sambanova.ai/) |
+| Apple M2 Ultra / M3 Ultra | Apple Silicon | Unified memory size/bandwidth, CPU/GPU shared-memory constraints, Metal backend profile | [Apple M2 Ultra](https://www.apple.com/newsroom/2023/06/apple-unveils-m2-ultra/) [Apple M3 Ultra](https://www.apple.com/newsroom/) |
+| NVIDIA V100/P100/K80 | Legacy | Legacy comparison only, clearly marked as older architecture | [NVIDIA Tesla archive](https://www.nvidia.com/en-us/data-center/tesla/) |
+
+## GPU specification fields
+
+| Field | Why it belongs in tokcalc |
+|---|---|
+| `memoryBytes` | Determines weight and KV-cache fit |
+| `memoryBandwidthGBps` | Strong predictor of decode-limited throughput |
+| `bf16TfopsDense`, `fp16TfopsDense` | Helps model prefill / compute-bound work |
+| `fp8Tfops`, `fp4Tfops` | Needed for supported low-precision kernels |
+| `interconnectType`, `interconnectGBps` | Determines practical tensor-parallel and PD-disaggregation behavior |
+| `pcieGeneration`, `pcieLanes` | Relevant for multi-GPU systems without NVLink |
+| `tdpWatts` | Enables energy estimates |
+| `formFactor` | PCIe, SXM, OAM, rack system, Apple SoC, TPU pod |
+| `engineSupport` | vLLM, TensorRT-LLM, SGLang, llama.cpp, ROCm, Metal, Habana, TPU runtime |
+| `priceObservation` | Separate, time-stamped, provider/region-specific object |
+
+## Avoid a misleading universal GPU score
+
+Decode usually tracks memory bandwidth and KV-cache access much more strongly than headline FLOPS; prefill may benefit more from compute throughput. Therefore expose separate scores:
+
+- **Weight-streaming decode roofline**
+- **Compute-bound prefill roofline**
+- **KV-cache capacity / concurrency**
+- **Multi-GPU communication penalty**
+
+NVIDIA’s official data-center product pages are the appropriate primary source for current architecture specifications, but product marketing peak FLOPS should not be treated as achieved LLM tokens/sec. [NVIDIA data center](https://www.nvidia.com/en-us/data-center/)
+
+# SECTION D — MORE QUANTIZATION FORMATS
+
+## Quantization implementation rule
+
+Do not show a single universal “accuracy loss” or “speedup” for a quantization format. It varies materially by:
+
+- model family and scale;
+- calibration dataset and quantization recipe;
+- per-channel/per-group configuration;
+- activation quantization;
+- kernel and engine;
+- prompt length, batch/concurrency, and GPU;
+- benchmark metric.
+
+Use **ranges plus source/model-specific benchmark records**, and always identify whether the number measures perplexity, MMLU, code, instruction-following, or a task metric.
+
+## Format roadmap
+
+| Format | What it is | Typical use | Engine support | Complexity | Priority |
+|---|---|---|---|---:|---:|
+| GGUF | `llama.cpp` model file format supporting many quantization schemes | CPU, Apple Silicon, consumer GPU local inference | llama.cpp and compatible runners | Medium | Must-have |
+| GPTQ | Post-training weight quantization, often 4-bit | NVIDIA GPU local serving and older quantized model ecosystem | vLLM/TGI/TensorRT-LLM support varies by version; strong ecosystem presence | Medium | Must-have |
+| AWQ | Activation-aware weight quantization, commonly W4A16 | GPU inference with preservation of salient weights | vLLM, TensorRT-LLM and others depending on release | Medium | Must-have |
+| EXL2 | ExLlamaV2 mixed-bit quantization format | Consumer NVIDIA GPU inference | ExLlamaV2 primarily | Medium | Nice |
+| SmoothQuant | Activation smoothing technique enabling weight-and-activation quantization | INT8-oriented serving | TensorRT-LLM / framework-dependent workflows | Medium | Nice |
+| FP8 | 8-bit floating-point inference/training formats | H100/H200-class supported kernels | TensorRT-LLM, vLLM/backend-dependent | Medium | Must-have |
+| NVFP4 | NVIDIA Blackwell FP4 inference format | Blackwell inference | NVIDIA Blackwell/TensorRT stack | Medium | Nice |
+| MX / OCP microscaling | Block-scaled low-precision formats | Emerging hardware/software ecosystem | Hardware/software dependent | Future | Future |
+| HQQ, EETQ, BitBLAS, QuaRot, QuIP#, SpinQuant | Research/tool-specific quantization methods | Experimental or specialized deployments | Uneven and volatile | High | Future |
+| BitNet b1.58 | Ternary-native architecture/weights rather than a drop-in quantization of arbitrary models | Research and specialized inference | Limited general production support | High | Future |
+
+Sources: [llama.cpp](https://github.com/ggerganov/llama.cpp) [GPTQ paper](https://arxiv.org/abs/2210.17323) [AWQ paper](https://arxiv.org/abs/2306.00978) [SmoothQuant paper](https://arxiv.org/abs/2211.10438) [NVFP4](https://developer.nvidia.com/blog/nvfp4-trains-with-precision-and-powers-efficient-inference/) [BitNet b1.58](https://arxiv.org/abs/2402.17764)
+
+## GGUF variants
+
+For GGUF, store the **exact file’s measured bytes/parameter** and benchmark metrics. Labels such as `Q4_K_M` identify quantization schemes but do not guarantee identical size/accuracy across model conversion versions and tensor mixes.
+
+| GGUF family | Approximate nominal weight precision | Tokcalc UI treatment | Priority |
+|---|---:|---|---:|
+| Q2_K | ~2-bit class | Extreme-memory mode; warn strongly on quality loss | Nice |
+| Q3_K_S / Q3_K_M | ~3-bit class | Low-memory mode; show quality-risk badge | Nice |
+| Q4_0 / Q4_1 | ~4-bit legacy/simple schemes | Legacy compatibility choices | Nice |
+| Q4_K_S / Q4_K_M | ~4-bit K-quant schemes | Recommended practical local-inference presets | Must-have |
+| Q5_0 / Q5_1 | ~5-bit legacy/simple schemes | Mid-quality/local performance options | Nice |
+| Q5_K_S / Q5_K_M | ~5-bit K-quant schemes | Higher-quality local presets | Must-have |
+| Q6_K | ~6-bit class | Near-FP16-quality preference where memory allows | Nice |
+| Q8_0 | ~8-bit class | High-quality compressed storage/reference point | Must-have |
+
+The `llama.cpp` project and its associated conversion tooling are the primary practical source for supported GGUF formats; exact quality and size need to be benchmarked for the specific model artifact. [llama.cpp](https://github.com/ggerganov/llama.cpp)
+
+## Quantization calculator fields
+
+```ts
+type QuantizationProfile = {
+  id: string;
+  format: "fp16" | "bf16" | "int8" | "gptq" | "awq" | "gguf" | "exl2" | "fp8" | "nvfp4";
+  nominalWeightBits?: number;
+  activationBits?: number;
+  kvCacheBits?: number;
+  bytesPerParameterMeasured?: number;
+  groupSize?: number;
+  engineSupport: Record<string, "native" | "plugin" | "convert" | "unsupported">;
+  dequantKernel: "fused" | "unfused" | "native-low-precision";
+  qualityEvidence: BenchmarkRecord[];
+  throughputEvidence: BenchmarkRecord[];
+};
+```
+
+## How to present speed and quality
+
+Instead of this:
+
+> “AWQ is 50% faster and loses 1% accuracy.”
+
+Show this:
+
+> “For **model X**, engine **Y**, GPU **Z**, workload **prompt/output/batch**, AWQ achieved **N output tok/s** versus FP16 **M output tok/s**. Quality score changed from **A** to **B** on benchmark **C**.”
+
+This protects tokcalc’s credibility.
+
+# SECTION E — CLOUD GPU PRICING (2025)
+
+## Pricing-data architecture
+
+Cloud pricing cannot responsibly be represented as one static 2025 value per accelerator/provider. Your pricing module should store price observations:
+
+```ts
+type PriceObservation = {
+  provider: string;
+  product: string;
+  accelerator: string;
+  acceleratorCount: number;
+  vramGB?: number;
+  region?: string;
+  billing: "on_demand" | "spot" | "reserved" | "serverless" | "per_second";
+  priceUSDPerHour: number;
+  minimumBillingSeconds?: number;
+  collectedAt: string;
+  sourceUrl: string;
+  availability?: "available" | "waitlist" | "not-listed";
+  notes?: string;
+};
+```
+
+## Provider source registry
+
+| Provider | Correct source category | Integration recommendation |
+|---|---|---|
+| RunPod | GPU Cloud pricing / API, serverless pricing | Separate secure/on-demand pods from serverless endpoint pricing. [RunPod pricing](https://www.runpod.io/gpu-instance/pricing) |
+| Lambda | Cloud GPU pricing | Capture instance configuration and GPU count, not just a GPU label. [Lambda Cloud pricing](https://lambda.ai/service/gpu-cloud/pricing) |
+| Modal | Serverless compute pricing | Model GPU price per second plus container/minimum/warm capacity behavior. [Modal pricing](https://modal.com/pricing) |
+| Vast.ai | Marketplace / spot-like listings | Treat as live market observations, with availability and reliability uncertainty. [Vast.ai pricing](https://vast.ai/pricing) |
+| Together AI | GPU cluster / service pricing | Distinguish hosted inference from dedicated GPU/rental offerings. [Together pricing](https://www.together.ai/pricing) |
+| Replicate | Per-second prediction hardware pricing | Capture billed seconds and cold-start conditions. [Replicate pricing](https://replicate.com/pricing) |
+| CoreWeave | Cloud/GPU pricing and enterprise quotation | Capture public rate only when publicly listed; otherwise mark quote-required. [CoreWeave](https://www.coreweave.com/) |
+| TensorDock | GPU cloud pricing | Capture region/hosted node details. [TensorDock pricing](https://www.tensordock.com/pricing) |
+| Hugging Face Inference Endpoints | Endpoint hardware pricing | Store endpoint hardware SKU and region. [Hugging Face endpoints pricing](https://huggingface.co/docs/inference-endpoints/pricing) |
+| AWS EC2 | On-demand instance pricing | Map instance family to GPUs: p5, p5e, p4d, g6, g5; use region-specific price API or pricing pages. [AWS accelerated computing](https://aws.amazon.com/ec2/instance-types/accelerated-computing/) |
+| Google Cloud | Accelerator/VM pricing | Map A3/A4 and TPU products separately. [Google Cloud GPU pricing](https://cloud.google.com/compute/gpus-pricing) |
+| Azure | VM pricing | Map ND H100 v5 / H200 offerings and region. [Azure GPU VM pricing](https://azure.microsoft.com/pricing/details/virtual-machines/linux/) |
+| Oracle Cloud | Compute GPU pricing | Map instance GPU configuration rather than isolated GPU. [Oracle GPU pricing](https://www.oracle.com/cloud/compute/gpu/pricing/) |
+
+## UI behavior for unavailable pairs
+
+The requested matrix includes many provider–accelerator combinations that will be blank because a provider does not offer that product. For example, a Mac M2 Ultra is normally purchased hardware rather than a mainstream cloud-GPU SKU; do not fabricate a cloud hourly rate. Render:
+
+- **Listed price** — date, region, billing type, source
+- **Not listed by provider** — no extrapolation
+- **Marketplace range** — min / median / P90, timestamped
+- **Quote required** — provider contact, no numerical claim
+- **Deprecated** — historical reference only
+
+## Recommended user-facing caveat
+
+> Prices are observations, not guarantees. They vary by region, availability, spot/on-demand/reserved commitment, billing granularity, included CPU/RAM/storage/network, and date. Select a provider and region to see the source record.
+
+# SECTION F — API PRICING FOR BUILD-VS-BUY COMPARISON
+
+## Pricing integration design
+
+API rates should be versioned just like hardware prices. Do not mix obsolete named models with current list prices without an “as of” date. Your application should source first-party price pages and retain historical snapshots.
+
+| Provider | Primary pricing source | Caching fields to support |
+|---|---|---|
+| OpenAI | [OpenAI API pricing](https://openai.com/api/pricing/) | input, cached input, output, batch, reasoning/other applicable modes |
+| Anthropic | [Anthropic pricing](https://www.anthropic.com/pricing) | base input, 5-minute cache write, 1-hour cache write, cache read, output |
+| Google | [Gemini API pricing](https://ai.google.dev/pricing) | input/output, context tiers, cached-content pricing where offered |
+| Together AI | [Together pricing](https://www.together.ai/pricing) | model-specific input/output rates and batch/endpoint distinctions |
+| Groq | [Groq pricing](https://groq.com/pricing/) | model-specific input/output rates, hosted model availability |
+| Fireworks AI | [Fireworks pricing](https://fireworks.ai/pricing) | model-specific serverless / on-demand distinctions |
+| Cerebras | [Cerebras pricing](https://www.cerebras.ai/pricing) | model-specific API rate and service tier |
+| DeepSeek | [DeepSeek pricing](https://api-docs.deepseek.com/quick_start/pricing) | cache miss/hit input rates, output rates, model/version |
+| Mistral | [Mistral pricing](https://mistral.ai/pricing/) | model-specific input/output, batch, cached input if available |
+
+## Prompt caching support
+
+| Provider | Caching behavior | Tokcalc treatment |
+|---|---|---|
+| Anthropic | Explicit prompt caching with documented write/read rates and TTL choices | Full cache model: write multiplier, read multiplier, TTL, hit rate. [Anthropic prompt caching](https://docs.anthropic.com/en/docs/build-with-claude/prompt-caching) |
+| OpenAI | Automatic prompt caching for eligible requests/models with matching prefixes; pricing includes cached-input categories where applicable | Model-specific cached input rate; no assumption that every prompt/model is eligible. [OpenAI prompt caching](https://platform.openai.com/docs/guides/prompt-caching) |
+| Google | Supports cached content in supported Gemini workflows; pricing and eligibility depend on model/product | Use model-specific cached-content price records from Google’s official pricing docs. [Gemini API pricing](https://ai.google.dev/pricing) |
+| DeepSeek | API pricing can distinguish cache-hit and cache-miss input handling | Store its published cache-hit/miss rates by model/version. [DeepSeek pricing](https://api-docs.deepseek.com/quick_start/pricing) |
+| Other vendors | Varies by provider/model | Leave null until first-party documentation confirms it. |
+
+## Build-vs-buy formula
+
+For a workload with \(I\) input tokens and \(O\) output tokens:
+
+\[
+\text{API cost} =
+\frac{I}{10^6}P_i +
+\frac{I_c}{10^6}P_{ic} +
+\frac{O}{10^6}P_o
+\]
+
+Where \(I_c\) is eligible cached input and \(P_{ic}\) is cached-input price.
+
+For self-hosting:
+
+\[
+\text{self-host monthly cost} =
+\left(\frac{\text{GPU price/hr} \cdot 730}{\text{utilization adjustment}}\right)
++ \text{storage} + \text{network} + \text{operational overhead}
+\]
+
+Keep operational overhead as an editable field rather than pretending it is zero.
+
+# SECTION G — TOP 10 PRIORITIZED FEATURE EXPANSIONS
+
+| Rank | Feature | Description | Why users want it | Complexity / estimate | Required data | Dependencies |
+|---:|---|---|---|---|---|---|
+| 1 | **Production serving mode** | Continuous batching, paged KV cache, concurrency, queueing, TTFT, and ITL estimates | Production throughput is dominated by scheduler behavior rather than single-request speed; vLLM introduced paged KV management and continuous batching for this exact reason. [vLLM paper](https://arxiv.org/abs/2309.06180) | **High, 50–90h** | Model architecture, GPU memory/bandwidth, engine profiles, workload distributions | Existing inference core |
+| 2 | **Build-vs-buy calculator** | Compare self-hosted deployment with OpenAI/Anthropic/Google/hosted-model token pricing | This is the product decision most teams actually need: economic break-even under their prompt/output mix and utilization | **Medium, 24–45h** | GPU prices, API prices, model throughput, utilization settings | Pricing ingestion |
+| 3 | **Prompt-cache calculator** | Compute self-hosted prefix-cache savings and provider API cache savings | Repeated system prompts, RAG context, and agent histories can yield large input-cost and TTFT reductions; Anthropic documents 0.1× cache-read pricing. [Anthropic prompt caching](https://docs.anthropic.com/en/docs/build-with-claude/prompt-caching) | **Medium, 16–30h** | Provider cache rules, workload/prompt profile | Build-vs-buy pricing |
+| 4 | **Long-context and KV-cache planner** | Show fit, concurrency, latency, and cost through 1M-token contexts | KV-cache memory scales linearly with live context length and becomes the practical constraint in long-context serving | **High, 30–70h** | Layers, KV heads, head dim, KV precision, GPU VRAM | Architecture ingestion |
+| 5 | **Live versioned data registry** | Automated model configs, accelerator specs, price observations, source URLs, dates, confidence | Every expansion request becomes sustainable only if data is refreshable, reviewable, and source-linked | **High, 45–80h** | Hugging Face configs, vendor specs, provider prices | None; start immediately |
+| 6 | **Embedding calculator** | Estimate documents/sec, tokens/sec, indexing cost, vector storage, and API/self-host comparison | Embeddings are a distinct high-throughput encoder workload central to RAG, and do not fit decode-token math. [OpenAI embeddings guide](https://platform.openai.com/docs/guides/embeddings) | **Medium, 24–48h** | Embedding models, dimensions, encoder benchmarks, API prices | Data registry |
+| 7 | **Reasoning and agent workflow planner** | Model hidden reasoning allowance, multi-call tools, context growth, retry rate, and end-to-end latency | Modern task completion often consists of several model calls plus tool latency, not a single chat completion | **Medium, 20–40h** | API rates, workload templates, cache model | Prompt cache, pricing |
+| 8 | **Quantization explorer** | Compare GGUF/GPTQ/AWQ/EXL2/FP8/NVFP4 with measured size, quality, and engine support | Users need a defensible fit-quality-speed trade-off, especially on consumer hardware | **Medium–High, 35–65h** | Artifact sizes, model-specific quality benchmarks, engine/GPU throughput tests | Benchmark registry |
+| 9 | **Vision workload mode** | Convert image/video inputs into model-specific visual-token/prefill estimates | Vision prompts can dominate effective context and cost; tokenization is model-specific. [Qwen2-VL](https://huggingface.co/Qwen/Qwen2-VL-72B-Instruct) | **High, 35–70h** | VLM configs, image-tokenization rules, vision benchmarks | Data registry |
+| 10 | **Multi-LoRA capacity planner** | Estimate adapter VRAM, resident adapters, cache behavior, and throughput range | Multi-tenant customization is a major self-hosting use case; Punica/S-LoRA demonstrate the serving need. [Punica](https://arxiv.org/abs/2310.18547) [S-LoRA](https://arxiv.org/abs/2311.03285) | **Medium, 24–50h** | Adapter rank/modules, base model config, engine profiles | Production serving mode |
+
+# SECTION H — KNOWN BENCHMARKS DATABASES
+
+| Database / project | URL | What it benchmarks | Update pattern | API / downloadable data | Commercial-use notes |
+|---|---|---|---|---|---|
+| MLPerf Inference | [mlcommons.org/benchmarks/inference](https://mlcommons.org/benchmarks/inference/) | Standardized inference performance, latency, throughput, power in defined scenarios | Benchmark rounds / periodic releases | Public results downloads; review result-license terms | MLCommons materials have their own terms; do not assume unrestricted commercial redistribution. |
+| Artificial Analysis | [artificialanalysis.ai](https://artificialanalysis.ai/) | Hosted-model quality, speed, latency, and pricing comparisons | Frequently updated | Website/API availability and terms must be checked before scraping | Treat as a licensed data source; do not scrape without permission. |
+| LMSYS Chatbot Arena / FastChat | [lmarena.ai](https://lmarena.ai/) | Human preference / model quality; some ecosystem leaderboard data | Continuous / periodic snapshots | Public datasets may be released for specific artifacts | Check each dataset/card license; quality data is not throughput data. |
+| Hugging Face Open LLM Leaderboard | [huggingface.co/open-llm-leaderboard](https://huggingface.co/open-llm-leaderboard) | Model-quality benchmarks | Continuously updated as submissions run | Hugging Face datasets/spaces; inspect individual licenses | License varies by dataset/model/result. |
+| vLLM benchmarks | [vLLM benchmarks docs](https://docs.vllm.ai/en/latest/contributing/benchmarks/) | Serving throughput, latency, scheduler performance across configurations | Repository/version-driven | Scripts and results are available in project ecosystem | Open-source code license applies to code; validate result reuse. |
+| TensorRT-LLM benchmarks | [TensorRT-LLM benchmarks](https://nvidia.github.io/TensorRT-LLM/performance/performance-tuning-guide/benchmarking-default.html) | NVIDIA inference performance by engine/configuration | Release-driven | Benchmark tooling/scripts; result availability varies | NVIDIA licensing/terms apply. |
+| llmperf | [GitHub: ray-project/llmperf](https://github.com/ray-project/llmperf) | API serving latency, TTFT, throughput under load | Repository-driven | Open-source benchmark harness; generate your own CSV | Apache-2.0 repository license; inspect repository for current terms. |
+| Hugging Face Optimum Benchmark | [GitHub: huggingface/optimum-benchmark](https://github.com/huggingface/optimum-benchmark) | Hardware/software benchmark harnesses for transformer inference | Repository-driven | Run locally and export your data | Open-source repository; verify its license/version. |
+| Stanford HELM | [crfm.stanford.edu/helm](https://crfm.stanford.edu/helm/) | Model accuracy, robustness, fairness, efficiency-related scenarios | Release-driven | Public scenarios/results depending on release | Check repository/data terms before commercial use. |
+| Papers with Code | [paperswithcode.com](https://paperswithcode.com/) | Research benchmark leaderboards, primarily quality | Community-maintained / variable | Web data/API policies vary | Do not scrape or redistribute without checking terms. |
+
+## Benchmark ingestion recommendation
+
+Use a three-tier evidence model:
+
+1. **First-party standardized:** MLPerf, vendor benchmark submissions.
+2. **Reproducible engine benchmark:** vLLM/TensorRT-LLM/llmperf command lines plus full configuration.
+3. **Community observation:** clear provenance and lower-confidence label.
+
+Every benchmark record should include:
+
+```ts
+type BenchmarkRecord = {
+  modelId: string;
+  modelRevision?: string;
+  quantizationId: string;
+  engine: string;
+  engineVersion?: string;
+  gpu: string;
+  gpuCount: number;
+  topology?: string;
+  promptTokens: number;
+  outputTokens: number;
+  concurrency: number;
+  requestRate?: number;
+  throughputOutputTokPerSec?: number;
+  throughputTotalTokPerSec?: number;
+  ttftMsP50?: number;
+  ttftMsP95?: number;
+  itlMsP50?: number;
+  itlMsP95?: number;
+  sourceUrl: string;
+  collectedAt: string;
+  evidenceTier: 1 | 2 | 3;
+};
+```
+
+# TL;DR for the maintainer
+
+1. **Build the data registry first.** Version model configs, GPU specs, benchmark records, API pricing, and rental-price observations with source URL, retrieval date, region, engine version, and confidence. This makes every later feature maintainable.
+
+2. **Ship a production serving calculator next.** Add continuous batching, paged KV cache, concurrency, TTFT, inter-token latency, and queueing; this is the biggest credibility upgrade from a static throughput estimate. [vLLM paper](https://arxiv.org/abs/2309.06180)
+
+3. **Add build-vs-buy plus prompt caching as one feature set.** Users can immediately compare self-hosting to APIs, model shared-prefix hit rates, and see the economics of their real workload. Anthropic explicitly documents 90%-discount cache reads relative to base input pricing. [Anthropic prompt caching](https://docs.anthropic.com/en/docs/build-with-claude/prompt-caching)
+
+4. **Make long-context/KV planning first-class.** Show KV memory, maximum concurrency, and cost at 8K, 32K, 128K, and beyond; this becomes essential as teams deploy long-context RAG and agent workflows.
+
+5. **Expand the catalog strategically, not exhaustively.** Add Qwen3/Qwen-VL, DeepSeek-V3/R1, Llama 4 released variants, Mistral/Pixtral, Gemma 3, Phi-4, embedding models, and current hardware—but pull values from official model configs and vendor specs instead of maintaining manually copied architecture tables.

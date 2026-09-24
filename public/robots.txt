@@ -1,0 +1,25 @@
+# Crawl everything
+User-agent: *
+Allow: /
+
+# Block the dev API route from indexing
+Disallow: /api/
+
+# Explicitly allow social preview crawlers (redundant, but explicit)
+User-agent: Twitterbot
+Allow: /
+
+User-agent: facebookexternalhit
+Allow: /
+
+User-agent: LinkedInBot
+Allow: /
+
+User-agent: Discordbot
+Allow: /
+
+User-agent: Slackbot
+Allow: /
+
+# Sitemap placeholder (to be added when SEO landing pages ship)
+# Sitemap: https://tokcalc.dev/sitemap.xml

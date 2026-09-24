@@ -1,0 +1,28 @@
+{
+  "choices": [
+    {
+      "finish_reason": "stop",
+      "index": 0,
+      "message": {
+        "content": "Based on the screenshot of the \"Create a new repository\" page for **tokcalc**, here is a detailed inventory of every UI element requiring copy, including its current state and what text it should contain:\n\n1.  **Page Title (Header):** Currently displays **\"General\"**. This is the main heading for this section of the form.\n2.  **Label: Owner:** Currently displays **\"Owner *\"**. Identifies the repository owner field. The asterisk denotes it is required.\n3.  **Dropdown: Owner Selection:** Currently populated with **\"stevecrates489-commits\"**. This is an interactive dropdown to select the user or organization that will own the repo.\n4.  **Label: Repository Name:** Currently displays **\"Repository name *\"**. Identifies the name input field. The asterisk denotes it is required.\n5.  **Input Field: Repository Name:** Currently contains the text **\"tokcalc\"**. This is where the user types the URL-friendly name of the project.\n6.  **Validation Message (Success):** Currently displays **\"✓ tokcalc is available.\"** in green. This is dynamic feedback confirming the name isn't taken.\n7.  **Helper Text / Callout:** Currently displays **\"Great repository names are short and memorable. How about miniature-tribble?\"**. This provides naming suggestions, including a clickable link (**\"miniature-tribble\"**) to auto-fill the field.\n8.  **Label: Description:** Currently displays **\"Description\"**. Labels the optional summary field.\n9.  **Input Field: Description:** Currently **Empty**. A large text box intended for a brief summary of the project.\n10. **Character Counter:** Currently displays **\"0 / 350 characters\"**. Dynamic text showing the current length relative to the limit.\n11. **Section Header:** Currently displays **\"Configuration\"**. The heading for the second step/section of the form.\n12. **Label: Visibility:** Currently displays **\"Choose visibility *\"**. Labels the privacy setting dropdown.\n13. **Helper Text (Visibility):** Currently displays **\"Choose who can see and commit to this repository\"**. Explains the purpose of the visibility setting.\n14. **Dropdown: Visibility Selection:** Currently set to **\"Public\"**. Allows toggling between Public and Private.\n15. **Label: README:** Currently displays **\"Add README\"**. Labels the option to initialize the repo with a readme file.\n16. **Helper Text (README):** Currently displays **\"READMEs can be used as longer descriptions. About READMEs\"**. Includes a link to documentation.\n17. **Toggle Switch (README):** Currently set to **\"Off\"**. A binary switch to enable/disable the file creation.\n18. **Label: .gitignore:** Currently displays **\"Add .gitignore\"**. Labels the option to include a gitignore template.\n19. **Helper Text (.gitignore):** Currently displays **\".gitignore tells git which files not to track. About ignoring files\"**. Includes a link to documentation.\n20. **Dropdown: .gitignore Template:** Currently displays **\"No .gitignore\"**. Allows selecting a template (e.g., Python, Node).\n21. **Label: License:** Currently displays **\"Add license\"**. Labels the option to add an open source license.\n22. **Helper Text (License):** Currently displays **\"Licenses explain how others can use your code. About licenses\"**. Includes a link to documentation.\n23. **Dropdown: License Selection:** Currently displays **\"No license\"**. Allows selecting a specific license type (e.g., MIT, Apache 2.0).\n24. **Primary Action Button:** Currently displays **\"Create repository\"**. The final submission button to generate the repo.",
+        "role": "assistant"
+      }
+    }
+  ],
+  "created": 1789978657,
+  "id": "202609211617158a17f0e338564361",
+  "model": "glm-5v-turbo",
+  "object": "chat.completion",
+  "request_id": "202609211617158a17f0e338564361",
+  "usage": {
+    "completion_tokens": 797,
+    "completion_tokens_details": {
+      "reasoning_tokens": 0
+    },
+    "prompt_tokens": 981,
+    "prompt_tokens_details": {
+      "cached_tokens": 0
+    },
+    "total_tokens": 1778
+  }
+}

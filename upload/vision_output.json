@@ -1,0 +1,28 @@
+{
+  "choices": [
+    {
+      "finish_reason": "stop",
+      "index": 0,
+      "message": {
+        "content": "$$\n\\text{Tokens per second} \\approx \\frac{\\text{Memory Bandwidth (GB/s)}}{\\text{Model File Size (GB)}}\n$$",
+        "role": "assistant"
+      }
+    }
+  ],
+  "created": 1789883212,
+  "id": "20260920134651ce866d5e1ab04715",
+  "model": "glm-5v-turbo",
+  "object": "chat.completion",
+  "request_id": "20260920134651ce866d5e1ab04715",
+  "usage": {
+    "completion_tokens": 35,
+    "completion_tokens_details": {
+      "reasoning_tokens": 0
+    },
+    "prompt_tokens": 152,
+    "prompt_tokens_details": {
+      "cached_tokens": 0
+    },
+    "total_tokens": 187
+  }
+}

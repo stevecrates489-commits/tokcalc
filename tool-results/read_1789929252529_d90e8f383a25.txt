@@ -1,0 +1,285 @@
+     1→# Research memo: tokcalc growth and roadmap
+     2→
+     3→Tokcalc’s strongest opportunity is to become the **engineering-grade “pre-deployment decision layer” for LLM inference**: workload-aware capacity, latency, KV-cache, topology, and cost planning—not another static GPU or API-price calculator. The evidence supports prioritizing open-source distribution, high-intent comparison SEO, and integrations into the serving ecosystem over broad paid acquisition.
+     4→
+     5→**Important limitations (as of 20 September 2026):** several requested competitor domains, alleged future hardware/model releases, social subscriber counts, influencer follower counts, and third-party SEO metrics cannot be independently verified from reliable public sources in this research pass. I do not invent those values. For volatile pricing and unreleased-product claims, tokcalc should label data with source, region, retrieval date, and confidence.
+     6→
+     7→## A. Acquisition channels
+     8→
+     9→### Channel priority
+    10→
+    11→| Rank | Channel | Reach / size signal | Engagement cost | Evidence of dev-tool success | Specific tokcalc launch tactic | Feasibility | Effort | Expected ROI |
+    12→|---:|---|---|---|---|---|---|---|---|
+    13→| 1 | GitHub + README + releases | GitHub is a primary discovery layer for infrastructure; unusually strong open-source projects can compound rapidly. For example, OpenClaw reportedly crossed 100K stars in under two weeks, while Graphiti reached 20K stars within roughly a year. These are exceptional, not baseline expectations.  [developersdigest](https://www.developersdigest.tech/blog/openclaw-github-star-chart-vertical-line) | Low | GitHub-native open source can turn users into contributors, backlinks, and downstream docs references | Make the repository the product’s canonical source: interactive screenshots/GIF, “capacity plan in 30 seconds,” benchmark-source methodology, calculators as shareable URLs, one-click issue templates for models/GPUs, and a public data-quality roadmap | High | Med | Very high |
+    14→| 2 | High-intent SEO | Queries around GPU comparison, model inference speed, long context, quantization, and API-vs-self-hosting express an imminent engineering or buying decision | Low–Med | Engineering comparison pages can earn links when they include reproducible assumptions and calculators—not merely prose | Generate programmatic but editorially reviewed landing pages such as `/llama-3-70b/h100/vllm`, with live calculator presets, sensitivity tables, assumptions, citations, and shareable scenario URLs | High | High | Very high |
+    15→| 3 | Hacker News | Small relative to mass social networks but highly concentrated among technical builders and decision-makers. A 2024–25 study of 138 AI/LLM repo launches found a mean 121 GitHub stars in 24 hours, 189 in 48 hours, and 289 in a week after HN exposure; timing mattered more than merely using “Show HN.”  [arxiv](https://arxiv.org/abs/2511.04453) | Low | Engineering depth and direct interaction consistently matter more than growth marketing language | Post a **Show HN: Tokcalc — open-source capacity planner for serving LLMs** only when the tool has a genuinely surprising technical artifact: e.g., “Given traffic, P95 TTFT, context, and cache hit rate, find the cheapest feasible topology.” Publish formulas, limitations, and a public dataset | High | Med | High |
+    16→| 4 | Reddit: r/LocalLLaMA first | Strong practitioner concentration around local inference, quantization, VRAM constraints, hardware, and benchmarks; exact subscriber figures must be captured manually on launch day because they change continuously | Low | Utility-first benchmark posts and transparent build logs tend to fit better than product announcements | Do not post “I made a calculator.” Post an original analysis: “How many concurrent 32K-context Llama/Qwen users fit on 4090, H100, H200, and B200 under vLLM?” Include methodology, raw data, calculator link, and invite corrections | High | Med | High |
+    17→| 5 | Serving-engine communities | vLLM and SGLang are actively releasing and expanding into hardware plugins and multimodal serving; their users already have the deployment problem tokcalc solves. vLLM’s repository listed v0.29.0 on 9 September 2026; SGLang listed v0.5.20 on 18 September 2026.  [github](https://github.com/vllm-project/vllm?utm_cta=website) | Low | Open-source users reward tools that reduce configuration uncertainty | Offer engine-specific presets and contribute documentation examples: “capacity-planning workflow for vLLM/SGLang.” Seek maintainer approval before requesting a docs link | High | Med | High |
+    18→| 6 | X / “LLM Twitter” | Fast discovery and feedback loop, but reach is volatile and follower counts are not a durable acquisition metric | Med | Demos, visual benchmark charts, and credible technical threads travel more reliably than generic launch posts | Ship one visual “capacity card” per week: model, context length, latency SLO, GPU/topology, concurrency, and monthly cost. Quote-post benchmark authors with a reproducible tokcalc scenario | High | Med | Med–High |
+    19→| 7 | LinkedIn | Viable primarily for infra buyers, platform leads, and cloud/GPU operators—not for broad open-source virality. Zep reportedly ran 23 LinkedIn ads among 33 active ads in August 2026, suggesting it can be a targeted B2B distribution channel.  [systemaic](https://www.systemaic.com/teardowns/zep-ai) | Med–High | Decision-maker content benefits from concrete economics and case studies | Publish operator-oriented posts: “Why a 128K context limit turns your H100 fleet into a KV-cache capacity problem.” Gate nothing; use a scenario calculator and invite architecture reviews | Med | Med | Med |
+    20→| 8 | Product Hunt | Still useful for launch-day discovery, but should be a secondary distribution event, not the strategy. PH reported 633 Developer Tools launches in Q2 2026, up 136% year over year; Open Source grew 143%. AI averaged 252 upvotes, Dev Tools 201, and Open Source 192.  [producthunt](https://www.producthunt.com/p/general/product-hunt-s-state-of-tech-discovery-q2-2026) | Med | Can create social proof and backlinks, but category noise is severe | Launch as **Open Source + Developer Tools + AI**. Avoid a generic “AI calculator” pitch; show a real capacity-plan workflow and publish an accompanying GitHub release and HN post on different days | High | Low–Med | Med |
+    21→| 9 | YouTube | Useful when a creator can demonstrate a full deployment decision rather than “reviewing a website”; public sponsorship pricing varies too much to cite as a reliable market rate | High | Technical creators amplify tools that improve an actual build workflow | Target small-to-mid technical channels first with a reproducible challenge: “plan a 70B model serving stack under \$X/month and prove the math.” Offer no paid claim requirements | Med | Med–High | Med |
+    22→| 10 | Dev.to / Medium / Substack | Better for evergreen technical explainers than direct product launch traffic; no credible cross-platform “LLM engineer readership per article” benchmark or universal view counts is publicly available | Low–Med | Deep, original engineering explainers can become SEO assets and link sources | Publish canonical articles on your domain first, then syndicate with canonical links: “Continuous batching math,” “KV cache per concurrent user,” and “When API pricing beats self-hosting” | High | Med | Med–High |
+    23→| 11 | Conferences | Strong for partnerships and design partners, weak for low-cost mass acquisition | High | Best for obtaining customer language, validation data, and integrations | Attend before sponsoring. Prioritize AI Engineer Summit for practitioner discovery; MLSys for serving credibility; GTC only if pursuing NVIDIA/cloud partnerships | Med | High | Med |
+    24→
+    25→### Reddit operating rules
+    26→
+    27→| Subreddit | Likely fit for tokcalc | What tends to perform | What risks removal or backlash | Recommended post |
+    28→|---|---|---|---|---|
+    29→| r/LocalLLaMA | Excellent | Local hardware tests, quantization comparisons, VRAM math, reproducible benchmarks, model-serving guides | Link-only promotion, unverifiable token/s claims, affiliate framing, reposting | “I modeled 4K/32K/128K concurrency for Llama/Qwen across 4090, Mac, H100, H200, B200—here are the formulas and calculator.” |
+    30→| r/MachineLearning | Moderate | Research contribution, methodology, benchmark analysis, open datasets | Product marketing, shallow demos, claims without methodology | Post only with a technical artifact: public workload trace schema, benchmark normalization method, or reproducible capacity-planning dataset |
+    31→| r/MLscaling | Excellent | Cluster economics, systems bottlenecks, serving architecture, topology | Simplistic GPU calculator framing | “A workload-driven model for prefill/decode disaggregation and topology selection” |
+    32→| r/LLMDevs | Good | API implementation, tool launches with code, practical deployment advice | Link dumping, broad “AI tool” content | “Open-source planner that exports a vLLM/SGLang configuration checklist” |
+    33→| r/ArtificialIntelligence | Low–Moderate | Accessible explainers, visual comparisons | Overly technical product pitches, spam | Use only after technical community validation; publish a simple “self-host vs API” explainer |
+    34→| r/SideProject | Good for founder feedback | Build stories, metrics, design feedback, launch retrospectives | Aggressive promotion without a story | “I built a free open-source LLM capacity planner—what assumptions would make you distrust it?” |
+    35→
+    36→**Recommendation:** Treat Reddit as an engineering peer-review channel, not an ad platform. Lead with a useful answer, disclose authorship, put methodology above CTA, and follow each community’s current rules on the day of posting. The public record in this pass did not provide reliable current subscriber counts or full moderation-rule text for all six communities, so scrape/capture these manually immediately before launch rather than embedding stale figures.
+    37→
+    38→### Hacker News: format that fits
+    39→
+    40→| Element | What to do | Why |
+    41→|---|---|---|
+    42→| Title | “Show HN: Tokcalc – open-source LLM serving capacity planner” | Clear, literal, technically scoped |
+    43→| First paragraph | State what it calculates and what it does **not** know: model, engine, GPU, context, traffic profile, SLO, cache behavior, topology assumptions | HN responds better to precision than aspiration |
+    44→| Proof | Include equations, sources, benchmark provenance, a worked example, and GitHub source | Makes claims inspectable |
+    45→| Differentiator | “Not a speed chart: it separates prefill/decode, KV-cache limits, continuous batching, prompt caching, and topology.” | Matches the actual product wedge |
+    46→| Founder participation | Be present for 8–12 hours and answer criticism with changes/links rather than defensiveness | Discussion is part of the launch |
+    47→| Avoid | “The first,” “revolutionary,” inflated accuracy claims, tracking-heavy signup gates, and vague “AI infra platform” language | These are common credibility failures |
+    48→
+    49→A defensible benchmark is the HN study: HN exposure correlated with average gains of 121 stars in 24 hours and 289 over a week among the sampled AI/LLM launches, but a “Show HN” tag itself had no independent statistical advantage once other factors were controlled. Build the artifact first; title format alone is not a growth hack. [arxiv](https://arxiv.org/abs/2511.04453)
+    50→
+    51→**Requested three specific recent successful AI-infra Show HN launches:** the available source results did not reliably provide three verified Show HN URLs, launch dates, and outcome data in the requested window. Do not cite unaudited listicles as evidence. Before posting, use the Algolia HN API or HN search to assemble a current, source-linked comp set by searching “Show HN” plus `inference`, `LLM`, `GPU`, `vLLM`, and `benchmark`.
+    52→
+    53→### X: practical target list
+    54→
+    55→Follower counts are volatile, often partly inauthentic, and require live profile/API checks; I cannot responsibly provide “current top 20” counts without a verifiable real-time social data source. Instead, build a target list around the people whose audiences match the product:
+    56→
+    57→| Cluster | Example accounts to validate before outreach | What to offer | Outreach angle |
+    58→|---|---|---|---|
+    59→| Open-model / local LLM | @ggerganov, @TheBlokeAI, @CohereForAI, @huggingface | Hardware/model scenario cards, quantization math | “We added a transparent planner for your model formats; can you audit the assumptions?” |
+    60→| Serving engines | @vllm_project, @sgl_project, NVIDIA TensorRT-LLM team accounts | Engine presets, benchmark ingestion, docs example | “Could tokcalc export a reproducible sizing plan for your deployment guide?” |
+    61→| Inference systems | @tri_dao, @ClementDelangue, @swyx, @hamelhusain | Architecture and cost visualizations | “Here is an interactive version of a capacity-planning question your audience asks repeatedly.” |
+    62→| GPU clouds / infrastructure | @runpod_io, @LambdaAPI, @modal_labs, @replicate, @togethercompute | Current-price adapter or embedded planner | “Let users estimate capacity on your SKUs with citations and a clear price timestamp.” |
+    63→| AI engineering community | @aiengineer, @LatentSpacePod, @Cognition, @LangChainAI | Shareable benchmark/cost cards | “We turned serving economics into a scenario link people can fork.” |
+    64→
+    65→Do **not** mass-DM twenty people with an identical launch request. Make one relevant capability or dataset contribution per account class, obtain feedback publicly where appropriate, and make the output useful even if nobody reposts it.
+    66→
+    67→### Community and directory integrations
+    68→
+    69→| Surface | Integration process | Recommendation | Feasibility | Effort | Expected ROI |
+    70→|---|---|---|---|---|---|
+    71→| Hugging Face model cards | Submit PRs only where project maintainers welcome it; use model-card metadata and linked Spaces where appropriate | Build a HF Space/Gradio wrapper or static “capacity-plan” link generator. Ask model owners to add a **Community resources** link; do not edit third-party cards without approval | High | Med | High |
+    72→| Hugging Face Spaces | Create a Space that calls a versioned tokcalc calculation API or bundles the open-source calculator | Use as discovery/demo, but keep canonical pages on tokcalc.dev for SEO and source governance | High | Low–Med | Med |
+    73→| Replicate | Model pages and APIs are provider-controlled | Propose a “capacity / self-host alternative” co-marketing widget; avoid assuming they will link externally | Med | Med–High | Med |
+    74→| Artificial Analysis | Its product is a benchmark and model-intelligence platform | Offer a transparent “capacity planner” outbound link/API where benchmark data feeds tokcalc assumptions; negotiate data licensing/provenance | Med | High | High |
+    75→| Papers with Code | Contribution requires a relevant paper/task/repository association | Publish an open benchmark dataset or methodology paper, not a promotional listing | Low–Med | High | Low–Med |
+    76→| GitHub Marketplace | Publish a GitHub Action with an action.yml, marketplace metadata, version tags, and documented permissions | `tokcalc/plan`: read a YAML traffic profile, calculate recommended capacity and estimated cost, post a PR comment/check | High | Med | High |
+    77→| VS Code Marketplace | Build a TypeScript extension | “Estimate serving impact” from model config, deployment YAML, or prompt/context profile; deep-link to full plans | High | Med | Med |
+    78→| MCP registry/ecosystem | MCP is now a large distribution layer; one report cited the TypeScript SDK at 52.6M weekly npm downloads in August 2026, although this should be independently rechecked before using it in marketing.  [buttondown](https://buttondown.com/Builder-Radar/archive/builder-radar-week-of-august-2-2026/) | Release a read-only tokcalc MCP server: `estimate_capacity`, `compare_gpu`, `estimate_api_vs_self_host`, `get_assumptions` | High | Med | Very high |
+    79→
+    80→## B. SEO opportunity analysis
+    81→
+    82→### Measurement caveat
+    83→
+    84→Ahrefs and Semrush do not provide a complete public, reproducible keyword-volume and difficulty dataset for the 20+ requested exact variants. Therefore, I will not fabricate monthly volumes or keyword-difficulty scores. Build a repeatable keyword-data job using an Ahrefs/Semrush account, Google Search Console, and Google Ads Keyword Planner; tag each number with country, device, match type, retrieval date, and tool.
+    85→
+    86→The most important SEO insight is that the requested terms are **not one keyword set**. They break into three very different intent classes:
+    87→
+    88→1. **Product/model lookup** — e.g., “Llama 4 Scout vs Maverick,” “DeepSeek R1 cost per million tokens.” Fast-changing, high freshness requirement.
+    89→2. **Comparison / deployment selection** — e.g., “H100 vs H200 LLM inference,” “vLLM vs TGI vs SGLang throughput.” Strong commercial and integration intent.
+    90→3. **Capacity-planning problem** — e.g., “how many concurrent users LLM GPU,” “long context LLM cost,” “continuous batching multiplier.” Likely lower raw volume but unusually high product fit and weaker competition.
+    91→
+    92→### Keyword cluster recommendations
+    93→
+    94→| Cluster / target query family | Volume / KD status | Likely ranking incumbents | Can tokcalc reach top 10 in 6 months? | Page to build | Feasibility | Effort | Expected ROI |
+    95→|---|---|---|---|---|---|---|---|
+    96→| “tokens per second” + Llama 3 / Qwen / DeepSeek / Mistral / Mixtral variants | **Estimated; obtain paid-tool export.** Exact model queries are fragmented and freshness-sensitive | Model docs, benchmark databases, Reddit, provider blogs, GitHub benchmark repos | Yes for long-tail combinations if pages add measured assumptions and calculator presets; no guarantee for head terms | One hub plus real pages for each model-family × hardware/engine combination. Show prefill, decode, batch, TTFT, ITL, context, quantization, methodology | High | High | Very high |
+    97→| H100 vs H200 / H100 vs A100 / B200 vs H100 for LLM inference | **Estimated; commercial comparison cluster** | Cloud provider docs, NVIDIA, benchmark vendors, cloud-pricing blogs | Yes for long-tail workload pages; head terms are competitive | “H100 vs H200 for 70B serving at 8K/32K/128K” with cost per useful output token, not raw FLOPS | High | Med | High |
+    98→| RTX 4090 / 3090 / 5090 LLM inference | **Estimated; enthusiast plus developer intent** | Local-LLM communities, hardware review sites, Ollama/llama.cpp content | Yes, especially with memory/quant/context constraints | “Can [model] run on RTX [GPU]?” pages with VRAM, quantization, expected single-user and batched serving scenarios | High | Med | High |
+    99→| Mac M2 Ultra / M3 Max / M4 Max LLM | **Estimated; persistent hardware intent** | Apple/MLX/llama.cpp guides, local-AI blogs | Moderate–High | Mac local inference planner, including unified-memory budget, context, MLX/llama.cpp engine presets | High | Med | Med–High |
+   100→| GGUF Q4_K_M vs Q5_K_M; GGUF vs GPTQ vs AWQ | **Estimated; educational long-tail** | Hugging Face, TheBloke-era guides, GitHub docs, community posts | High if technically rigorous and maintained | Quantization decision tree: quality, model weight size, kernels/engine support, VRAM, throughput—not a generic comparison | High | Med | High |
+   101→| vLLM vs TGI vs SGLang throughput | **Estimated; high-value engineering comparison** | Official docs, GitHub, vendor benchmarks, independent analyses | Moderate; high competition but strong differentiator possible | Workload matrix: identical model, request mix, shared-prefix rate, context, TTFT/ITL, topology; link directly to planner | High | High | Very high |
+   102→| FP8 vs FP16 H100 | **Estimated; engineering intent** | NVIDIA, TensorRT-LLM, framework docs | Moderate–High | Precision calculator with model support, memory impact, expected accuracy caveats, and engine/hardware compatibility | High | Med | High |
+   103→| self host vs OpenAI API | **Estimated; broad and competitive** | OpenAI, cloud vendors, cost-calculator blogs | Moderate for generic head term; High for “at [traffic/model/context]” long-tail | Interactive break-even calculator with utilization, reserved/spot/on-demand, labor/ops, prompt caching, reasoning tokens | High | High | Very high |
+   104→| how many concurrent users LLM GPU | **Estimated; likely modest but ideal product intent** | Forums, docs, sporadic blogs | High | Canonical explainer + calculator: concurrency is a workload/SLO/KV-cache question, not a GPU constant | Very high | Med | Very high |
+   105→| long context LLM cost | **Estimated; emerging, growing commercial intent** | API pricing pages, model provider blogs | High | Long-context cost planner: prefill, KV memory, cache hit rate, context distribution, batching, output ratio | Very high | Med | Very high |
+   106→| DeepSeek R1 cost per million tokens | **Estimated; freshness-heavy** | Official provider/API pages, aggregators | Moderate; dependent on rapid pricing updates and authority | Date-stamped source table plus “effective cost including reasoning/prompt cache”; no evergreen unsupported claims | Med | Low–Med | Med |
+   107→| Llama 4 Scout vs Maverick | **Estimated; model-comparison freshness query** | Meta, Hugging Face, reviews/benchmarks | Moderate | Capability + serving-cost comparison with explicit release/version dates and workload presets | Med | Med | Med |
+   108→| AMD MI300X vs NVIDIA H100 | **Estimated; high buyer intent** | AMD/NVIDIA, cloud providers, benchmark sites | Moderate–High | Model-specific serving comparison, ROCm maturity and engine support, not merely hardware specs | High | Med | High |
+   109→| 1M context window model comparison | **Estimated; emerging high-intent topic** | Provider docs, model review sites | High | Context economics table: max context, attention behavior, supported serving engines, price/KV implications | High | Med | High |
+   110→| continuous batching multiplier | **Estimated; low-volume expert query** | vLLM docs, papers, technical blogs | High | Explain why no universal multiplier exists; interactive arrival-rate, request-size, SLO, batch, cache simulation | Very high | Med | High |
+   111→| Anthropic prompt caching savings | **Estimated; strong branded topic, fast-changing pricing** | Anthropic official docs | Low–Moderate for head term; High for calculators/examples | Source-cited calculator that implements current rules and clearly shows timestamp/version | Med | Low | Med |
+   112→| reasoning tokens cost o1 / o3-mini | **Estimated; branded and mutable** | OpenAI pricing/docs | Low–Moderate for head query; High for explanatory long tails | “Visible vs billed token economics” page with model/version citations and usage scenarios | Med | Low–Med | Med |
+   113→
+   114→### Six-month SEO execution plan
+   115→
+   116→| Month | Deliverable | Success metric |
+   117→|---:|---|---|
+   118→| 1 | Establish data schema, canonical URL structure, calculator deep links, JSON-LD, citation/provenance component, sitemap | Every page has model/version/GPU/engine/date assumptions; no duplicate programmatic pages |
+   119→| 1–2 | Publish 10 “capacity problem” pages: concurrent users, long context, KV cache, prompt caching, continuous batching, TTFT/ITL | Impressions and backlinks from technical communities |
+   120→| 2–3 | Publish 15 engine × hardware × model workload comparisons | Ranked long-tail queries; calculator scenario starts |
+   121→| 3–4 | Publish self-host vs API and provider/GPU cost pages with regional timestamped price feeds | Organic conversion into saved/shared plans |
+   122→| 4–6 | Refresh price/model pages automatically; turn validated benchmark inputs into study pages | Click-through rate, referring domains, GitHub stars, recurring usage |
+   123→| Continuous | Use Search Console to identify actual query variants and create only pages with distinct user intent | Avoid low-value scaled-content risk |
+   124→
+   125→### SEO data system to build
+   126→
+   127→| Field | Why it matters |
+   128→|---|---|
+   129→| Exact keyword + locale + language + device | “H100 vs H200” demand varies materially by country and device |
+   130→| Tool/source + retrieval date | Keyword volumes and difficulty are estimates, not facts |
+   131→| Intent label | Informational, comparison, purchase-adjacent, calculator |
+   132→| SERP composition | Official docs vs forums vs commercial tools determines realistic competitiveness |
+   133→| Target page + scenario | Every keyword should map to an actual unique calculator use case |
+   134→| Freshness SLA | Pricing: daily/weekly; model releases: on release; hardware specs: on official update |
+   135→| Conversion event | Copy scenario, export report, GitHub star, mailing-list opt-in, integration request |
+   136→
+   137→## C. Trends to prepare for
+   138→
+   139→### High-confidence product trends
+   140→
+   141→| Trend | What is happening | Timing | Tokcalc feature | Priority | Feasibility | Effort | Expected ROI |
+   142→|---|---|---|---|---|---|---|---|
+   143→| Prefill/decode disaggregation | Production serving is moving beyond a single monolithic server. A 2026 serving analysis described SGLang production-scale P/D on 96 H100s, the vLLM llm-d project’s Kubernetes-native disaggregation, and NVIDIA Dynamo integration across major engines.  [fish](https://fish.audio/blog/open-source-llm-inference-engines-2026/) | Now; accelerating through 2026 | Add a **P/D architecture planner**: separate prefill and decode pools, interconnect requirement, KV-transfer overhead, queueing, topology, and cost model | Must | High | High | Very high |
+   144→| KV-cache / prefix-cache economics | Serving advantage is shifting toward cache reuse, routing, memory layout, and long-context scheduler behavior; the ecosystem is explicitly emphasizing prefix reuse and cache routing.  [linkedin](https://www.linkedin.com/pulse/kv-cache-eats-scheduler-sanchit-monga-mfpkc) | Now | Add **cache-aware capacity**: prefix-sharing distribution, cache hit rate, cache retention, multi-turn/agent trace models, cache storage cost, warm/cold TTFT | Must | High | Med–High | Very high |
+   145→| Speculative decoding | Analyses of the 2026 ecosystem describe speculative decoding as widespread and report latency reductions, but exact multipliers depend heavily on model/draft model/workload and must not be universalized.  [baeseokjae.github](https://baeseokjae.github.io/posts/local-ai-model-serving-frameworks-2026/) | Now; default-like in many optimized stacks | Add draft-model selector, acceptance-rate sensitivity, speculative overhead, TTFT vs ITL effects, and engine support matrix | Must | High | Med | High |
+   146→| Engine divergence by workload | vLLM and SGLang remain central; comparisons emphasize that throughput leadership varies with workload, structured output, prefix reuse, and operational maturity rather than a single winner.  [devopsbeast](https://devopsbeast.com/blog/vllm-vs-sglang-production-2026) | Now | Add **engine selector** driven by workload shape: shared prefixes, JSON constraint, agent turns, batch profile, hardware, and operational maturity | Must | High | Med | Very high |
+   147→| Multimodal serving | vLLM-Omni and SGLang-Omni show serving scope expanding from text into audio, vision, video, TTS, and diffusion. vLLM-Omni’s August 2026 notes describe broader production-ready coverage across TTS, speech, diffusion, image/video, and robot-policy serving; SGLang-Omni had a v0.1.6 release on 17 September 2026.  [github](https://github.com/vllm-project/vllm-omni) | Now through 12 months | Extend workload schema beyond text tokens: image patches, audio seconds, video frames, modality-specific prefill, streaming output, and KV/memory accounting | Nice | Med | High | High |
+   148→| Blackwell pricing / availability tracking | Public B200 price claims vary dramatically by provider and packaging. One June comparison reported \$3.70–\$14/GPU-hour, with AWS p6-B200 shown at \$14.24/GPU-hour in an eight-GPU shape; another source showed different values. Treat public-price data as region/SKU/date-specific.  [beam](https://www.beam.cloud/blog/nvidia-b200-pricing) | Available in major-cloud forms; price discovery remains fragmented | Build a **versioned cloud SKU price tracker** with region, VM shape, min GPU count, on-demand/spot/reserved, retrieval timestamp, and source URL | Must | Med | High | Very high |
+   149→| AMD MI400 / MI455X | Public sources conflict on architecture naming and launch specifics. One report says MI400 launched July 2026 and describes MI455X/Helios; earlier reporting cited 432GB HBM4 and 19.6TB/s. Confirm only against AMD primary sources before publishing product specs.  [whatledto](https://whatledto.com/events/amd-instinct-ai-gpus) | 2026 generation; exact cloud availability/pricing must be source-verified | Add MI400-series schema now, mark data as “pending official cloud SKU”; include ROCm/engine maturity and topology considerations | Nice | Med | Med | Med–High |
+   150→| Apple serving / Metal | vLLM Metal is active: its repository notes M5 NAX tensor-unit acceleration for MHA/GQA/MQA prefill in August 2026 and a default unified paged varlen Metal attention backend.  [github](https://github.com/vllm-project/vllm-metal) | Now | Add Apple Silicon engine support, unified-memory planning, local deployment vs cloud cost, MLX/llama.cpp/vLLM-Metal selection | Nice | High | Med | Med |
+   151→| MCP distribution | MCP is becoming a broadly distributed interface layer; a 2026 report cited large npm activity for the SDK, though exact figures must be refreshed before use externally.  [buttondown](https://buttondown.com/Builder-Radar/archive/builder-radar-week-of-august-2-2026/) | Now | Ship a read-only MCP server plus an embeddable widget/API, so coding agents and internal engineering assistants can call tokcalc during design reviews | Must | Med | Med | Very high |
+   152→| Energy / carbon disclosure | Regulatory requirements should be handled with legal review. The user’s named EU AI Act and California SB 53 are relevant policy areas, but exact applicability, dates, thresholds, and obligations must be verified against primary legal/regulatory materials before making compliance claims | 2026 onward; jurisdiction-specific | Add an **optional carbon / energy estimator** with clear assumptions, region electricity intensity source, utilization, and a “not legal advice / not compliance determination” label | Future | Med | High | Med |
+   153→
+   154→### Low-confidence or unverified roadmap items
+   155→
+   156→| Requested item | Research status as of 20 Sep 2026 | Tokcalc response | Priority |
+   157→|---|---|---|---|
+   158→| NVIDIA B100 / B300 cloud availability | The public results retrieved support B200 cloud availability/pricing discussion but do not provide a reliable, primary-source cross-cloud date/pricing matrix for B100/B300 | Do not publish unsupported dates. Create hardware records only after official AWS/GCP/Azure product/pricing pages exist; track “announced,” “limited,” “GA,” and “price available” separately | Nice |
+   159→| DeepSeek V4 / R2 schedule | No reliable primary-source schedule retrieved | Do not create prediction pages. Add a “rumor/unconfirmed” exclusion rule to catalog governance | Future |
+   160→| Llama 4 Behemoth GA / Scout 2 | No reliable release schedule retrieved | Maintain release watchlist; publish only released model variants and official configurations | Future |
+   161→| GPT-5 / Gemini 2.5 / Claude 4 pricing and “reasoning token standardization” | The request bundles volatile products/pricing and an inference about future billing practice; no adequate primary evidence retrieved here | Build a flexible billing schema now: input, output, cached input, reasoning/hidden-output category, tool calls, batch, and tiers | Must |
+   162→| Apple M5 Ultra timing / bandwidth | No reliable primary-source evidence retrieved | Support hardware additions through a data adapter; do not forecast SKU specs | Future |
+   163→| Intel Gaudi 4 / 5 | No reliable roadmap evidence retrieved | Track as watchlist, not product commitment | Future |
+   164→| Google TPU v7 / Ironwood specifications and pricing | No reliable primary-source pricing/spec evidence retrieved | Add a TPU architecture type to schema, but wait for public serving-performance/price evidence | Nice |
+   165→| Groq next-gen LPU | No reliable public release evidence retrieved | Add Groq as a provider/accelerator abstraction only when pricing, model support, and workload metrics can be cited | Future |
+   166→| mxFP8 / MXFP4 / BitNet 2 | Quantization nomenclature and runtime support evolve rapidly; no sufficiently authoritative status source retrieved here | Build quantization as composable metadata: weight precision, activation precision, KV precision, group size, format, kernel/engine support, accuracy evidence | Must |
+   167→| Multimodal context caching roadmaps | Provider roadmaps are not a reliable basis for an implementation promise | Model it generically as modality-aware cached-prefix reuse; expose provider-specific behavior only when documented | Nice |
+   168→| Agent-framework consolidation | No reliable evidence supports declaring one winner among LangGraph, AutoGen, and CrewAI | Integrate at workload-trace level, not framework-brand level: model calls, context, tool calls, cache reuse, response SLO | Nice |
+   169→| BGE-M4 / Jina v4 / OpenAI v4 embeddings | Specific release names/roadmaps not verified | Build an embeddings capacity module using vectors/sec, batch size, dimensions, latency, index/write cost, and model version | Nice |
+   170→
+   171→### What to model next
+   172→
+   173→| New planner input | Reason |
+   174→|---|---|
+   175→| Prompt-token distribution, not one prompt length | Mean context hides the tail that drives KV capacity |
+   176→| Output-token distribution | Decode capacity and perceived latency are output-sensitive |
+   177→| Arrival process / burst factor | Averages do not size a production system |
+   178→| TTFT p50/p95 and ITL p50/p95 objectives | “Tokens/sec” alone is not an SLO |
+   179→| Prefix-sharing/cache hit rate | Agent/RAG workloads can have radically different effective cost at the same token volume |
+   180→| Model architecture | Dense vs MoE, layers, hidden dimension, attention type, KV heads, sliding window, multimodal components |
+   181→| Engine configuration | Tensor/pipeline/data/context parallelism, speculative settings, chunked prefill, KV dtype, scheduler |
+   182→| Network/topology | NVLink/NVSwitch, PCIe, InfiniBand/Ethernet, cross-node penalties |
+   183→| Procurement mode | On-demand, spot, savings plan/reserved, owned hardware, utilization, operator cost |
+   184→| Confidence interval | Distinguish measured benchmarks, derived estimates, and user-supplied assumptions |
+   185→
+   186→## D. Competitor and serving-stack moves
+   187→
+   188→### Findings and caveat
+   189→
+   190→The requested 90-day competitor audit requires live site/changelog/GitHub inspection for every named domain. In the results available here, I could not verify current changelogs, commits, product roadmaps, or even ownership/relevance for `induwara.lk`, `gigagpu.com`, `kickllm.com`, `cloudparity.io`, `curlscape.com`, and `profitable.ai`. Absence of evidence is not evidence that they shipped nothing.
+   191→
+   192→Treat the following as a transparent **verification status**, not an assertion about those companies’ activity.
+   193→
+   194→| Target | Last-90-day finding | Evidence quality | Strategic implication for tokcalc | Feasibility | Effort | Expected ROI |
+   195→|---|---|---|---|---|---|---|
+   196→| induwara.lk AI inference calculator | No verified changelog/repository update retrieved | Insufficient | Do a manual monthly screenshot + Wayback + linked-GitHub/change-log review. Compete on evidence, workload inputs, and open-source transparency | High | Low | Med |
+   197→| gigagpu.com calculator | No verified recent update retrieved | Insufficient | Monitor pricing/page changes; differentiate through capacity and topology rather than GPU hourly-price comparison | High | Low | Med |
+   198→| kickllm.com | No verified recent update retrieved | Insufficient | Treat as an adjacent SEO competitor until verified; track keyword overlap in Semrush/Ahrefs | High | Low | Low–Med |
+   199→| cloudparity.io | No verified recent update retrieved | Insufficient | Focus on explainable build-vs-buy economics and dated price sources | High | Low | Med |
+   200→| curlscape.com | No verified recent update retrieved | Insufficient | Win on actual serving architecture rather than API-price display | High | Low | Med |
+   201→| Artificial Analysis | It remains relevant as benchmark/model intelligence infrastructure, but no specific new feature could be responsibly asserted from the available sources | Insufficient for release audit | Potential data/traffic partner; do not position against it as a direct calculator substitute | Med | High | High |
+   202→| vLLM | The main repo showed v0.29.0 as latest on 9 Sep 2026. vLLM-Metal describes active Apple Silicon work; vLLM-Omni describes expansion into multimodal serving and release alignment with upstream.  [github](https://github.com/vllm-project/vllm?utm_cta=website) | Strong for repo/release status, weaker for full feature enumeration | Build versioned vLLM presets, P/D plans, speculative-decoding inputs, Apple support, and multimodal capability flags | High | Med | Very high |
+   203→| SGLang | Main repository listed v0.5.20 on 18 Sep 2026; its 2026 Q2 roadmap explicitly named parallelism, multimodal, hardware, kernels, reliability, and observability.  [github](https://github.com/sgl-project/sglang?ref=bm) | Strong | Give SGLang a first-class engine model: Radix/prefix reuse, structured output, P/D, and hardware-specific paths | High | Med | Very high |
+   204→| TensorRT-LLM | No verified release-note result retrieved in this pass | Insufficient | Pull directly from NVIDIA’s official release notes before producing claims; add it as NVIDIA-optimized engine option | High | Med | High |
+   205→| llama.cpp | The official releases page showed b9862 as latest in a July 2026 indexed result, with frequent build-numbered releases. No verified claim about “new GGUF variants” can be made from this result alone.  [github](https://github.com/ggml-org/llama.cpp/releases/) | Moderate | Maintain a compatibility matrix sourced from llama.cpp docs/releases; focus on local/edge and Apple/consumer GPU scenarios | High | Med | High |
+   206→
+   207→### Competitive-monitoring system
+   208→
+   209→| Job | Cadence | Data source | Output |
+   210→|---|---:|---|---|
+   211→| Page diff | Weekly | Competitor product/pricing/changelog pages | “Changed pricing, new model/GPU/feature” alert |
+   212→| GitHub release watcher | Daily | vLLM, SGLang, TensorRT-LLM, llama.cpp, Hugging Face TGI | Versioned engine compatibility backlog |
+   213→| Provider price collector | Daily/weekly | Official cloud price APIs/pages; not blogs when official data exists | Date-stamped GPU SKU pricing table |
+   214→| SEO overlap | Monthly | Ahrefs/Semrush | Keyword gap and cannibalization report |
+   215→| Benchmark refresh | Monthly or per engine/model release | Official benchmarks + reproducible community runs | Confidence-weighted performance dataset |
+   216→| Community signal scan | Weekly | GitHub issues, Reddit, HN, Discord release channels | Requests that should become presets or docs |
+   217→
+   218→## E. Strategic integrations and partnerships
+   219→
+   220→| Rank | Target | Who they are | Why it fits | Specific mechanism | Expected acquisition lift | Feasibility | Effort | Expected ROI |
+   221→|---:|---|---|---|---|---|---|---|---|
+   222→| 1 | vLLM | Leading open-source high-throughput serving engine; current repo activity and frequent releases indicate a large active deployment base.  [github](https://github.com/vllm-project/vllm?utm_cta=website) | Tokcalc solves a question vLLM docs users face before config tuning: “How many GPUs/topology do I need for this workload?” | Engine-specific calculator preset; YAML/config checklist export; docs PR only after maintainers agree; benchmark-import adapter | High-quality technical traffic and credibility | High | Med | Very high |
+   223→| 2 | SGLang | High-performance LLM/multimodal serving framework with active releases and roadmap across parallelism, multimodal, kernels, and reliability.  [github](https://github.com/sgl-project/sglang?ref=bm) | Workload-specific planning is especially relevant to shared-prefix and agent workloads | SGLang scenario templates; Radix/prefix-cache and P/D inputs; docs example; community benchmark collaboration | High-quality technical traffic | High | Med | Very high |
+   224→| 3 | Hugging Face | Model hub and open-source ecosystem | A model user often needs to know whether a model is deployable under their latency, context, and budget | HF Space plus model-card “Capacity planning” resource links via maintainer-approved PRs; model metadata import | Broad top-of-funnel and backlinks | High | Med | Very high |
+   225→| 4 | GitHub Marketplace | Distribution surface for developer workflows | Planning can run in CI before infrastructure changes merge | GitHub Action that reads a workload YAML and comments cost/capacity regressions on PRs | High-intent developer adoption | High | Med | High |
+   226→| 5 | MCP ecosystem | Agent/tool interface ecosystem with strong developer adoption signals.  [buttondown](https://buttondown.com/Builder-Radar/archive/builder-radar-week-of-august-2-2026/) | Makes tokcalc callable from IDE agents and internal platform assistants | Open-source MCP server with read-only capacity, cost, GPU, and model-comparison tools | Potentially broad and compounding | High | Med | Very high |
+   227→| 6 | Modal | Serverless GPU platform | Users need workload-to-SKU/cost mapping | Embed/widget proposal or maintained “Modal deployment capacity preset”; affiliate only if transparent | Qualified deployer traffic | Med | Med | High |
+   228→| 7 | RunPod | GPU cloud / developer audience | Strong alignment with GPU rental selection and self-host economics | Public SKU-price adapter; co-branded cost comparison page; scenario deep links | High purchase-intent traffic | Med | Med | High |
+   229→| 8 | Lambda | GPU cloud / managed AI infrastructure | Same decision point: model, GPU, throughput, cost | Source-cited price import + “estimate this Lambda configuration” widget | High purchase-intent traffic | Med | Med | High |
+   230→| 9 | Replicate | Hosted model API/platform | Helps developers compare hosted calls with deployment choices | “API cost vs self-host” report using documented pricing, co-marketing widget proposal | Medium, commercially valuable | Med | Med–High | High |
+   231→| 10 | fal | Generative-model inference platform | Strong fit as multimodal capacity planning grows | Modality-aware scenario cards, provider cost adapter, integration content | Medium | Med | Med | Med–High |
+   232→| 11 | LlamaIndex | RAG/data framework | RAG drives context length, cache behavior, embedding demand, and tool calls | Workload-trace exporter into tokcalc; “size your RAG workload” guide | Medium–High | Med | Med | High |
+   233→| 12 | LangChain / LangGraph | Agent/application framework ecosystem | Agent loops create the workload patterns static token calculators miss | LangSmith trace import or JSON trace schema; cost/capacity plugin | Medium–High | Med | High | High |
+   234→| 13 | Continue.dev | Open-source coding assistant | Coding agents create repeated-prefix, multi-turn, long-context workloads | VS Code extension integration or deployment-sizing docs | Medium | High | Med | Med–High |
+   235→| 14 | Cline | AI coding-agent ecosystem | Similar agentic workload and developer audience | MCP-first integration; example “self-host model for Cline” plans | Medium | High | Med | Med–High |
+   236→| 15 | Artificial Analysis | Model performance/pricing intelligence | Benchmark data can improve tokcalc; tokcalc can provide the deployment-planning layer | Data-license/API partnership, benchmark provenance links, reciprocal workflow | High strategic value, slower deal cycle | Low–Med | High | High |
+   237→
+   238→### Partnership sequence
+   239→
+   240→| Phase | Goal | Deliverables |
+   241→|---|---|---|
+   242→| 0–30 days | Make integration technically credible | Stable calculation API, scenario URL format, versioned model/GPU/price schema, MCP server alpha, GitHub Action MVP |
+   243→| 31–60 days | Earn ecosystem credibility | vLLM/SGLang templates, Hugging Face Space, two open benchmark methodology posts, direct maintainer outreach |
+   244→| 61–90 days | Convert into distribution | One cloud-provider price integration, one framework trace import, one approved docs/reference placement |
+   245→| 90+ days | Build embedded distribution | White-label widget/API, partnership data feeds, CI policy checks, enterprise/export workflow |
+   246→
+   247→## F. TL;DR action plan
+   248→
+   249→### Top five acquisition tactics this month
+   250→
+   251→| Rank | Action | Why now | Concrete output | Feasibility | Effort | Expected ROI |
+   252→|---:|---|---|---|---|---|---|
+   253→| 1 | Publish a flagship **capacity-planning study** | It creates the artifact needed for Reddit, HN, X, SEO, and partner outreach simultaneously | “How many concurrent users can Llama/Qwen/DeepSeek serve at 8K, 32K, 128K on 4090/H100/H200/B200?” with formulas, raw assumptions, and scenario links | High | Med | Very high |
+   254→| 2 | Release an exemplary GitHub README and public methodology | Open-source trust is the primary differentiator versus opaque calculators | README, benchmark/source policy, data versioning, contribution guide, screenshots, one-command local setup | High | Med | Very high |
+   255→| 3 | Launch 10 high-intent SEO calculator pages | Capacity problems are unusually aligned with tokcalc’s unique value | Pages for concurrency, long context, H100/H200, vLLM/SGLang, quantization, and self-host/API break-even | High | High | Very high |
+   256→| 4 | Ship an MCP server plus GitHub Action alpha | It places tokcalc where engineering work happens and creates an integration story | `estimate_capacity` MCP tool and PR-check Action driven by a workload YAML | High | Med | Very high |
+   257→| 5 | Run one disciplined Reddit + HN sequence | Direct technical feedback will improve credibility and prioritization | Reddit technical-analysis post first; incorporate feedback; then HN Show HN with transparent limitations | High | Med | High |
+   258→
+   259→### Top five features for 90 days
+   260→
+   261→| Rank | Feature | Why it maintains edge | Definition of done | Feasibility | Effort | Expected ROI |
+   262→|---:|---|---|---|---|---|---|
+   263→| 1 | Workload-trace / SLO capacity planner | Converts tokcalc from a spec calculator into a deployment decision system | Input distributions for prompt/output/arrival/cache; outputs GPU count/topology, p50/p95 TTFT/ITL, utilization, cost range | High | High | Very high |
+   264→| 2 | P/D disaggregation planner | The serving stack is moving toward separately managed prefill and decode resources.  [fish](https://fish.audio/blog/open-source-llm-inference-engines-2026/) | Separate pools, KV transfer/network cost, architecture recommendation, break-even vs monolithic serving | Med–High | High | Very high |
+   265→| 3 | Cache-aware economics | Prefix reuse and KV management increasingly determine actual cost/capacity.  [linkedin](https://www.linkedin.com/pulse/kv-cache-eats-scheduler-sanchit-monga-mfpkc) | Prompt-cache/prefix-cache hit-rate simulation, cache-memory trade-offs, agent/RAG presets | High | Med | Very high |
+   266→| 4 | Engine-aware configuration presets | There is no universally best engine; workload shape matters.  [devopsbeast](https://devopsbeast.com/blog/vllm-vs-sglang-production-2026) | vLLM, SGLang, TensorRT-LLM, llama.cpp/MLX profiles with version/source/confidence fields | High | Med | Very high |
+   267→| 5 | Versioned price and benchmark provenance system | Price claims conflict even for B200, so credibility is the product.  [beam](https://www.beam.cloud/blog/nvidia-b200-pricing) | Every result includes sources, observed date, region/SKU, benchmark conditions, confidence, and changelog | High | High | Very high |
+   268→
+   269→### Three 2026 trends that matter most
+   270→
+   271→| Trend | Why it reshapes serving | Tokcalc must support |
+   272→|---|---|---|
+   273→| P/D disaggregation | Prefill and decoding have different compute, memory, and latency characteristics; sizing a single homogeneous GPU pool increasingly produces wrong economics.  [fish](https://fish.audio/blog/open-source-llm-inference-engines-2026/) | Separate prefill/decode pools, KV transfer, interconnect, queueing, topology |
+   274→| Cache-aware / long-context serving | KV-cache memory and prefix reuse are becoming the primary capacity determinants for agentic and long-context applications.  [linkedin](https://www.linkedin.com/pulse/kv-cache-eats-scheduler-sanchit-monga-mfpkc) | Context distributions, cache hit rates, KV precision/offload, retention and routing |
+   275→| Hardware/software fragmentation | B200 pricing varies by cloud, MI400-series systems are emerging, Apple paths are active, and engines differ by workload and hardware.  [beam](https://www.beam.cloud/blog/nvidia-b200-pricing) | Vendor-neutral model, engine, topology, and price adapters with evidence labels |
+   276→
+   277→## Positioning
+   278→
+   279→> **Tokcalc is the open-source capacity planner that turns your LLM traffic, context, latency SLOs, cache behavior, and model choice into a defensible serving topology and cost plan.**
+   280→
+   281→## Defensible moat
+   282→
+   283→The strongest moat is a **transparent, versioned workload-to-deployment dataset and calibration loop**: real benchmark provenance plus anonymized/opt-in workload traces, engine settings, cache behavior, topology outcomes, and observed-versus-predicted results.
+   284→
+   285→A static catalog of models, GPUs, prices, or calculators is easy to copy. A trusted system that can answer, with evidence, “for this request distribution and SLO, this vLLM/SGLang topology on this SKU will meet p95 TTFT/ITL at this utilization and cost range—and here is why we believe it” becomes difficult to replicate.

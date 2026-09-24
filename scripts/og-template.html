@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@600;700;800;900&family=JetBrains+Mono:wght@500;700&display=swap');
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 1200px; height: 630px; overflow: hidden; }
+  body {
+    font-family: 'Inter', -apple-system, sans-serif;
+    /* Solid dark background — no gradients (LinkedIn compression destroys subtle gradients).
+       Slight green tint stays on-brand without losing contrast. */
+    background: #0a0e0a;
+    color: #ffffff;
+    display: flex;
+    flex-direction: column;
+    padding: 80px 88px;
+  }
+
+  /* Top row: BIG logo + brand name. Logo is 96px (was 56px) — visible at 520px card */
+  .header { display: flex; align-items: center; gap: 24px; }
+  .logo-mark {
+    width: 96px; height: 96px; border-radius: 22px;
+    background: linear-gradient(135deg, #34d399 0%, #059669 100%);
+    display: flex; align-items: center; justify-content: center;
+    /* Subtle shadow only — no glow effect (gets destroyed by compression) */
+    box-shadow: 0 12px 40px rgba(16, 185, 129, 0.5);
+  }
+  .logo-mark svg { width: 52px; height: 52px; }
+  .brand {
+    font-size: 64px; font-weight: 900; letter-spacing: -0.05em;
+    color: #ffffff; line-height: 1;
+  }
+  .brand-sub {
+    font-size: 22px; color: #34d399; font-weight: 600;
+    margin-left: 20px; padding-left: 20px;
+    border-left: 2px solid rgba(52, 211, 153, 0.4);
+    line-height: 1.2;
+  }
+
+  /* Hero headline — MASSIVE. 88px so even at 520px card width it's ~38px = readable.
+     Pure white on near-black = max contrast, survives LinkedIn compression. */
+  .hero {
+    margin-top: 40px;
+    font-size: 88px;
+    font-weight: 900;
+    line-height: 1.05;
+    letter-spacing: -0.045em;
+    color: #ffffff;
+  }
+  .hero .accent {
+    color: #34d399; /* Saturated emerald, not subtle — survives compression */
+  }
+
+  /* Tagline — 28px (was 18px). Single line, no metric clutter. */
+  .tagline {
+    margin-top: 24px;
+    font-size: 28px;
+    color: #d4d4d8; /* Light gray, not dark gray — stays readable */
+    font-weight: 500;
+    line-height: 1.35;
+    max-width: 1000px;
+  }
+
+  /* Footer: bold URL. No chips, no metric pills — those get destroyed by compression.
+     Just one big readable brand line. */
+  .footer {
+    margin-top: auto;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding-top: 32px;
+    border-top: 2px solid rgba(52, 211, 153, 0.25);
+  }
+  .url {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 32px;
+    color: #34d399;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+  }
+  .tagline-pill {
+    font-size: 24px;
+    color: #ffffff;
+    font-weight: 700;
+    background: rgba(52, 211, 153, 0.15);
+    border: 2px solid rgba(52, 211, 153, 0.4);
+    padding: 10px 20px;
+    border-radius: 8px;
+  }
+</style>
+</head>
+<body>
+  <div class="header">
+    <div class="logo-mark">
+      <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M12 2L12 6M12 18L12 22M4.93 4.93L7.76 7.76M16.24 16.24L19.07 19.07M2 12L6 12M18 12L22 12M4.93 19.07L7.76 16.24M16.24 7.76L19.07 4.93"
+              stroke="#042f1c" stroke-width="3" stroke-linecap="round"/>
+        <circle cx="12" cy="12" r="3" fill="#042f1c"/>
+      </svg>
+    </div>
+    <div class="brand">tokcalc</div>
+    <div class="brand-sub">LLM serving<br>capacity planner</div>
+  </div>
+
+  <div class="hero">
+    Plan your LLM deployment<br>
+    <span class="accent">before you rent the GPUs.</span>
+  </div>
+  <div class="tagline">
+    Open-source capacity planner: model fit, KV-cache, throughput, latency, multi-GPU scaling, and cost.
+  </div>
+
+  <div class="footer">
+    <div class="url">tokcalc.dev</div>
+    <div class="tagline-pill">Open source · 35 models · 30 GPUs</div>
+  </div>
+</body>
+</html>
