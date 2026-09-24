@@ -1,11 +1,13 @@
 {
   "name": "@tokcalc/mcp-server",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "tokcalc MCP server — open-source LLM serving capacity planner for AI agents (Cursor, Claude Desktop, Cline). 6 read-only tools: estimate_capacity, compare_gpus, recommend_topology, estimate_api_vs_self_host, list_models, list_gpus.",
   "type": "module",
   "license": "Apache-2.0",
   "bin": {
-    "tokcalc-mcp": "./dist/index.js"
+    "tokcalc-mcp": "./dist/index.js",
+    "tokcalc-mcp-server": "./dist/index.js",
+    "mcp-server": "./dist/index.js"
   },
   "files": [
     "dist/",
@@ -30,5 +32,9 @@
   "homepage": "https://tokcalc.vercel.app",
   "engines": {
     "node": ">=18"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.1",
+    "zod-to-json-schema": "^3.25.2"
   }
 }
