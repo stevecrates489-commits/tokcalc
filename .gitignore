@@ -9,6 +9,9 @@ node_modules
 !.yarn/plugins
 !.yarn/releases
 !.yarn/versions
+dist/
+build/
+node_modules/ 
 
 # testing
 /coverage
@@ -21,6 +24,8 @@ node_modules
 /build
 
 *recovery_codes*
+
+inspector-protocol-node-*.json
 
 # misc
 .DS_Store
@@ -55,3 +60,4 @@ prompt
 server.log
 # Skills directory
 /skills/
+

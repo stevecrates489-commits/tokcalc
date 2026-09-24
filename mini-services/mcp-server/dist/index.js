@@ -20612,6 +20612,19 @@ function fmtContext(tokens) {
 }
 
 // mini-services/mcp-server/index.ts
+function formatInputSchema(schema) {
+  const json = zodToJsonSchema(schema, {
+    target: "jsonSchema7",
+    $refStrategy: "none"
+  });
+  delete json["$schema"];
+  return {
+    type: "object",
+    properties: json.properties || {},
+    required: json.required || [],
+    ...json
+  };
+}
 var ModelIdSchema = string2().describe("Canonical tokcalc model ID (e.g. 'llama3-8b'). Call list_models first if unknown.");
 var GpuIdSchema = string2().describe("Canonical tokcalc GPU ID (e.g. 'h100-sxm'). Call list_gpus first if unknown.");
 var QuantSchema = _enum(["fp32", "fp16", "bf16", "int8", "int4", "gguf-q2k", "gguf-q3km", "gguf-q4km", "gguf-q5km", "gguf-q6k", "gguf-q8", "gptq4", "awq4", "exl2-6bpw", "fp8", "nvfp4"]);
@@ -20684,7 +20697,6 @@ function handleEstimateCapacity(input) {
   });
   const model = MODEL_MAP[input.model];
   const gpu = GPU_MAP[input.gpu];
-  const quant = QUANT_MAP[input.quantization];
   return {
     summary: `${model?.name || input.model} on ${gpu?.name || input.gpu} (${input.quantization}): ${fmtTokens(result.decodeTokensPerSec)} tok/s decode, ${fmtMs(result.ttftMs)} TTFT, ${fmtBytes(result.totalVramNeededGb)} VRAM needed, ${fmtMoney(result.costPerMillionOutputTokens)}/M tokens`,
     feasibility: {
@@ -20782,7 +20794,6 @@ function handleRecommendTopology(input) {
   const quant = QUANT_MAP[input.quantization];
   if (!model || !quant)
     return { error: "Unknown model or quantization" };
-  const recommendations = GPUS.slice(0, 0);
   const results = GPUS.map((g) => {
     const rec = recommendTopology(model, g, input.contextTokens, input.batchSize, quant.bytesPerParam);
     const maxConcurrent = computeMaxConcurrency(model, g, 1, input.contextTokens, quant.bytesPerParam);
@@ -20911,45 +20922,41 @@ var TOOL_DEFINITIONS = [
   {
     name: "estimate_capacity",
     description: "Estimate whether an LLM-serving configuration fits in memory and can meet throughput and latency targets. Returns VRAM/KV-cache breakdown, throughput and latency ranges, concurrency, cost, confidence, assumptions, and sources.",
-    inputSchema: zodToJsonSchema(EstimateCapacitySchema)
+    inputSchema: formatInputSchema(EstimateCapacitySchema)
   },
   {
     name: "compare_gpus",
     description: "Compare supported GPU or cloud SKU options for the same LLM workload. Use before recommending hardware.",
-    inputSchema: zodToJsonSchema(CompareGpusSchema)
+    inputSchema: formatInputSchema(CompareGpusSchema)
   },
   {
     name: "recommend_topology",
     description: "Recommend feasible GPU/topology designs including tensor parallelism and context parallel (RingAttention) when needed.",
-    inputSchema: zodToJsonSchema(RecommendTopologySchema)
+    inputSchema: formatInputSchema(RecommendTopologySchema)
   },
   {
     name: "estimate_api_vs_self_host",
     description: "Compare monthly token-based API costs with self-hosted GPU infrastructure under stated utilization assumptions.",
-    inputSchema: zodToJsonSchema(EstimateApiVsSelfHostSchema)
+    inputSchema: formatInputSchema(EstimateApiVsSelfHostSchema)
   },
   {
     name: "list_models",
     description: "List tokcalc-supported model IDs and metadata. Use before estimating if the requested model is ambiguous or unknown.",
-    inputSchema: zodToJsonSchema(ListModelsSchema)
+    inputSchema: formatInputSchema(ListModelsSchema)
   },
   {
     name: "list_gpus",
     description: "List GPU and cloud SKU IDs, memory, bandwidth, pricing, and categories.",
-    inputSchema: zodToJsonSchema(ListGpusSchema)
+    inputSchema: formatInputSchema(ListGpusSchema)
   }
 ];
-var server = new Server({ name: "tokcalc", version: "0.1.0" }, {
+var server = new Server({ name: "tokcalc", version: "0.1.2" }, {
   capabilities: {
     tools: {}
   }
 });
 server.setRequestHandler(ListToolsRequestSchema, async () => ({
-  tools: TOOL_DEFINITIONS.map((t) => ({
-    name: t.name,
-    description: t.description,
-    inputSchema: t.inputSchema
-  }))
+  tools: TOOL_DEFINITIONS
 }));
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const { name, arguments: args } = request.params;
@@ -21010,5 +21017,3 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 var transport = new StdioServerTransport;
 await server.connect(transport);
 console.error("tokcalc MCP server started (stdio transport) — 6 tools available");
-console.error("Tools: estimate_capacity, compare_gpus, recommend_topology, estimate_api_vs_self_host, list_models, list_gpus");
-

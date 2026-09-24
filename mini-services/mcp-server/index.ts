@@ -8,28 +8,6 @@
  *   4. estimate_api_vs_self_host — break-even analysis
  *   5. list_models — discover supported model IDs
  *   6. list_gpus — discover supported GPU IDs
- *
- * All tools are read-only, deterministic, and return ranges + confidence + sources.
- * No side effects, no cloud credentials, no deployments.
- *
- * Usage:
- *   bun mini-services/mcp-server/index.ts
- *   npx @tokcalc/mcp-server
- *
- * Claude Desktop config:
- *   {
- *     "mcpServers": {
- *       "tokcalc": {
- *         "command": "npx",
- *         "args": ["-y", "@tokcalc/mcp-server"]
- *       }
- *     }
- *   }
- *
- * Per Perplexity research (Prompt #4):
- *   "Build tokcalc MCP as a read-only, local-first, evidence-aware planning API"
- *   "Use MCP spec 2026-07-28, TypeScript SDK v2, Zod v4, stdio first"
- *   "Copy Linear's security model: read-only capabilities enforced server-side"
  */
 
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
@@ -50,20 +28,35 @@ import {
   fmtMoney,
   GPUS,
   MODELS,
-  QUANTIZATIONS,
   QUANT_MAP,
   GPU_MAP,
   MODEL_MAP,
   computeMaxConcurrency,
   computeKVCacheGb,
-  computeLongContextPrefillMs,
   recommendTopology,
   fmtContext,
   type Quantization,
 } from "../../src/lib/token-calc.ts";
 
+// Helper function to format Zod schema for MCP protocol compliance (Strips $schema meta-tag)
+function formatInputSchema(schema: z.ZodTypeAny) {
+  const json = zodToJsonSchema(schema, {
+    target: "jsonSchema7",
+    $refStrategy: "none",
+  }) as Record<string, any>;
+
+  delete json["$schema"];
+
+  return {
+    type: "object",
+    properties: json.properties || {},
+    required: json.required || [],
+    ...json,
+  };
+}
+
 // ============================================================
-// TOOL SCHEMAS (Zod v4, per MCP SDK v2 Standard Schema)
+// TOOL SCHEMAS
 // ============================================================
 
 const ModelIdSchema = z.string().describe("Canonical tokcalc model ID (e.g. 'llama3-8b'). Call list_models first if unknown.");
@@ -142,7 +135,7 @@ function handleEstimateCapacity(input: z.infer<typeof EstimateCapacitySchema>) {
     promptTokens: input.promptTokens,
     outputTokens: input.outputTokens,
     engineId: input.engine,
-    effMem: undefined, // engine-presets handles this via the web app; MCP uses default
+    effMem: undefined,
     useContinuousBatching: input.continuousBatching,
     continuousBatchingMultiplier: input.continuousBatchingMultiplier,
     reasoningTokens: input.reasoningTokens,
@@ -150,7 +143,6 @@ function handleEstimateCapacity(input: z.infer<typeof EstimateCapacitySchema>) {
 
   const model = MODEL_MAP[input.model];
   const gpu = GPU_MAP[input.gpu];
-  const quant = QUANT_MAP[input.quantization as Quantization];
 
   return {
     summary: `${model?.name || input.model} on ${gpu?.name || input.gpu} (${input.quantization}): ${fmtTokens(result.decodeTokensPerSec)} tok/s decode, ${fmtMs(result.ttftMs)} TTFT, ${fmtBytes(result.totalVramNeededGb)} VRAM needed, ${fmtMoney(result.costPerMillionOutputTokens)}/M tokens`,
@@ -235,7 +227,6 @@ function handleCompareGpus(input: z.infer<typeof CompareGpusSchema>) {
   const sorted = results.sort((a, b) => {
     if (input.sortBy === "lowest_cost") return a.costPerMillionTokens - b.costPerMillionTokens;
     if (input.sortBy === "highest_throughput") return b.aggregateTokensPerSecond - a.aggregateTokensPerSecond;
-    // best_value: throughput per dollar
     return (b.aggregateTokensPerSecond / Math.max(b.costPerMillionTokens, 0.001)) - (a.aggregateTokensPerSecond / Math.max(a.costPerMillionTokens, 0.001));
   }).slice(0, input.limit);
 
@@ -252,8 +243,6 @@ function handleRecommendTopology(input: z.infer<typeof RecommendTopologySchema>)
   const model = MODEL_MAP[input.model];
   const quant = QUANT_MAP[input.quantization as Quantization];
   if (!model || !quant) return { error: "Unknown model or quantization" };
-
-  const recommendations = GPUS.slice(0, 0); // Start empty
 
   const results = GPUS.map(g => {
     const rec = recommendTopology(model, g, input.contextTokens, input.batchSize, quant.bytesPerParam);
@@ -390,39 +379,39 @@ function handleListGpus(input: z.infer<typeof ListGpusSchema>) {
 }
 
 // ============================================================
-// TOOL DEFINITIONS (for ListTools response)
+// TOOL DEFINITIONS
 // ============================================================
 
 const TOOL_DEFINITIONS = [
   {
     name: "estimate_capacity",
     description: "Estimate whether an LLM-serving configuration fits in memory and can meet throughput and latency targets. Returns VRAM/KV-cache breakdown, throughput and latency ranges, concurrency, cost, confidence, assumptions, and sources.",
-    inputSchema: zodToJsonSchema(EstimateCapacitySchema),
+    inputSchema: formatInputSchema(EstimateCapacitySchema),
   },
   {
     name: "compare_gpus",
     description: "Compare supported GPU or cloud SKU options for the same LLM workload. Use before recommending hardware.",
-    inputSchema: zodToJsonSchema(CompareGpusSchema),
+    inputSchema: formatInputSchema(CompareGpusSchema),
   },
   {
     name: "recommend_topology",
     description: "Recommend feasible GPU/topology designs including tensor parallelism and context parallel (RingAttention) when needed.",
-    inputSchema: zodToJsonSchema(RecommendTopologySchema),
+    inputSchema: formatInputSchema(RecommendTopologySchema),
   },
   {
     name: "estimate_api_vs_self_host",
     description: "Compare monthly token-based API costs with self-hosted GPU infrastructure under stated utilization assumptions.",
-    inputSchema: zodToJsonSchema(EstimateApiVsSelfHostSchema),
+    inputSchema: formatInputSchema(EstimateApiVsSelfHostSchema),
   },
   {
     name: "list_models",
     description: "List tokcalc-supported model IDs and metadata. Use before estimating if the requested model is ambiguous or unknown.",
-    inputSchema: zodToJsonSchema(ListModelsSchema),
+    inputSchema: formatInputSchema(ListModelsSchema),
   },
   {
     name: "list_gpus",
     description: "List GPU and cloud SKU IDs, memory, bandwidth, pricing, and categories.",
-    inputSchema: zodToJsonSchema(ListGpusSchema),
+    inputSchema: formatInputSchema(ListGpusSchema),
   },
 ];
 
@@ -431,7 +420,7 @@ const TOOL_DEFINITIONS = [
 // ============================================================
 
 const server = new Server(
-  { name: "tokcalc", version: "0.1.0" },
+  { name: "tokcalc", version: "0.1.2" },
   {
     capabilities: {
       tools: {},
@@ -441,11 +430,7 @@ const server = new Server(
 
 // Handle ListTools
 server.setRequestHandler(ListToolsRequestSchema, async () => ({
-  tools: TOOL_DEFINITIONS.map(t => ({
-    name: t.name,
-    description: t.description,
-    inputSchema: t.inputSchema,
-  })),
+  tools: TOOL_DEFINITIONS,
 }));
 
 // Handle CallTool
@@ -517,4 +502,3 @@ const transport = new StdioServerTransport();
 await server.connect(transport);
 
 console.error("tokcalc MCP server started (stdio transport) — 6 tools available");
-console.error("Tools: estimate_capacity, compare_gpus, recommend_topology, estimate_api_vs_self_host, list_models, list_gpus");

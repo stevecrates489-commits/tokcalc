@@ -1,6 +1,6 @@
 {
   "name": "@tokcalc/mcp-server",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "tokcalc MCP server — open-source LLM serving capacity planner for AI agents (Cursor, Claude Desktop, Cline). 6 read-only tools: estimate_capacity, compare_gpus, recommend_topology, estimate_api_vs_self_host, list_models, list_gpus.",
   "type": "module",
   "license": "Apache-2.0",
