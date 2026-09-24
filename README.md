@@ -316,6 +316,53 @@ We welcome contributions! See [CONTRIBUTING.md](CONTRIBUTING.md) for:
 - 🟢 Real benchmark data (run vLLM benchmarks and submit with provenance)
 - 🟢 Translations (especially Chinese, Japanese, Korean)
 
+## MCP server — use tokcalc from AI agents
+
+tokcalc ships an [MCP (Model Context Protocol)](https://modelcontextprotocol.io) server that lets AI agents (Cursor, Claude Desktop, Cline) call tokcalc during design reviews.
+
+### 6 read-only tools
+
+| Tool | What it does |
+|---|---|
+| `estimate_capacity` | VRAM/KV/throughput/latency/cost for one config |
+| `compare_gpus` | Ranked GPU comparison for one workload |
+| `recommend_topology` | TP/CP topology recommendation |
+| `estimate_api_vs_self_host` | Break-even analysis |
+| `list_models` | Discover supported model IDs |
+| `list_gpus` | Discover supported GPU IDs |
+
+All tools are **read-only** — no side effects, no cloud credentials, no deployments.
+
+### Install
+
+Add to your Claude Desktop config (`~/Library/Application Support/Claude/claude_desktop_config.json` on macOS):
+
+```json
+{
+  "mcpServers": {
+    "tokcalc": {
+      "command": "npx",
+      "args": ["-y", "@tokcalc/mcp-server"]
+    }
+  }
+}
+```
+
+Or run locally:
+
+```bash
+git clone https://github.com/stevecrates489-commits/tokcalc.git
+cd tokcalc
+bun install
+bun mini-services/mcp-server/index.ts
+```
+
+### Example agent prompt
+
+> "I need to serve Llama 3.3 70B at 32K context for 50 concurrent users. What GPU topology do you recommend, and how much will it cost per month?"
+
+The agent calls `list_models` → `list_gpus` → `recommend_topology` → `estimate_capacity` → returns a structured plan with VRAM, throughput, latency, cost, and confidence.
+
 ## Tech stack
 
 - **Framework**: Next.js 16 with App Router
