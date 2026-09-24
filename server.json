@@ -1,21 +1,17 @@
 {
-  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
-  "name": "dev.tokcalc/capacity-planner",
-  "description": "Open-source LLM serving capacity planner for model fit, KV cache, throughput, latency, topology, and cost. Read-only, deterministic, evidence-aware.",
-  "version": "0.1.0",
-  "websiteUrl": "https://tokcalc.vercel.app",
+  "$schema": "https://static.modelcontextprotocol.io/schemas/0.1.0/server.json",
+  "name": "io.github.stevecrates489-commits/tokcalc",
+  "description": "Planning tools for AI agents to estimate VRAM, compute requirements, throughput, latency, and GPU topology for LLM workloads.",
   "repository": {
-    "url": "https://github.com/stevecrates489-commits/tokcalc",
-    "source": "github"
+    "type": "git",
+    "url": "https://github.com/stevecrates489-commits/tokcalc.git"
   },
+  "version": "0.1.2",
   "packages": [
     {
-      "registryType": "npm",
-      "identifier": "@tokcalc/mcp-server",
-      "version": "0.1.0",
-      "transport": {
-        "type": "stdio"
-      }
+      "registry": "npm",
+      "name": "@tokcalc/mcp-server",
+      "version": "0.1.2"
     }
   ]
 }
