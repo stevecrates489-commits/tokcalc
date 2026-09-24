@@ -11,12 +11,13 @@ import {
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
-import { AlertTriangle, CheckCircle2, Upload, Beaker } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Upload, Beaker, Download } from "lucide-react";
 import {
   vllmParser,
 } from "@/lib/benchmark-parser-vllm";
 import { sglangParser } from "@/lib/benchmark-parser-sglang";
 import { trtllmParser } from "@/lib/benchmark-parser-trtllm";
+import { tokcalcStandardParser, BENCHMARK_TEMPLATE } from "@/lib/benchmark-parser-tokcalc";
 import type {
   BenchmarkRecord,
   BenchmarkParser,
@@ -56,7 +57,7 @@ export function BenchmarkImport({ estimate, modelName, gpuName }: BenchmarkImpor
     // TRT-LLM has unique field names (first_token_latency_avg, inter_token_latency_avg)
     // SGLang has unique field names (total_throughput, ttft_avg, itl_avg)
     // vLLM is most generic (output_throughput, mean_ttft_ms) — try last
-    const parsers: BenchmarkParser[] = [trtllmParser, sglangParser, vllmParser];
+    const parsers: BenchmarkParser[] = [trtllmParser, sglangParser, vllmParser, tokcalcStandardParser];
     for (const parser of parsers) {
       if (parser.detect(rawText)) {
         const parsed = parser.parse(rawText);
@@ -102,22 +103,44 @@ export function BenchmarkImport({ estimate, modelName, gpuName }: BenchmarkImpor
       </CardHeader>
       <CardContent className="space-y-3">
         {!record && !expanded && (
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setExpanded(true)}
-            className="w-full gap-1.5"
-          >
-            <Upload className="size-3.5" />
-            Import a benchmark result
-          </Button>
+          <div className="flex flex-col sm:flex-row gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setExpanded(true)}
+              className="flex-1 gap-1.5"
+            >
+              <Upload className="size-3.5" />
+              Import a benchmark result
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                const blob = new Blob([BENCHMARK_TEMPLATE], { type: "application/json" });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement("a");
+                a.href = url;
+                a.download = "tokcalc-benchmark-template.json";
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+                track("downloaded_benchmark_template");
+              }}
+              className="flex-1 gap-1.5"
+            >
+              <Download className="size-3.5" />
+              Download template
+            </Button>
+          </div>
         )}
 
         {expanded && !record && (
           <>
             <div>
               <Textarea
-                placeholder={`Paste the JSON output from:\nvllm benchmark_serving.py --model ... --dataset ...\n\nExample fields it should contain:\n  "output_throughput": 382.89\n  "mean_ttft_ms": 71.54\n  "mean_itl_ms": 7.74\n  "num_requests": 1000`}
+                placeholder={`Paste JSON from:\n- vllm benchmark_serving.py output\n- SGLang benchmark output\n- TensorRT-LLM benchmark_serving.py output\n- tokcalc community template (download above)\n\nOr click "Download template" to get a structured JSON you can fill in manually.`}
                 value={rawText}
                 onChange={(e) => setRawText(e.target.value)}
                 className="font-mono text-xs min-h-[160px] resize-y"
