@@ -22,6 +22,7 @@ import { ThemeToggle } from "@/components/theme-toggle";
 import { ConfidenceDot, ConfidenceBadge, ConfidenceLegend } from "@/components/confidence-badge";
 import { BenchmarkImport } from "@/components/benchmark-import";
 import { AzureLivePricing } from "@/components/azure-live-pricing";
+import { VastAiLivePricing } from "@/components/vast-ai-live-pricing";
 import type { Confidence } from "@/lib/token-calc";
 import { track } from "@/lib/track";
 import {
@@ -2445,6 +2446,9 @@ function ReferenceTab() {
         <>
           {/* Live Azure prices (fetched from Azure Retail Prices API) */}
           <AzureLivePricing />
+
+          {/* Vast.ai marketplace spot prices */}
+          <VastAiLivePricing />
 
           {/* Static estimates from tokcalc catalog */}
           <Card>
