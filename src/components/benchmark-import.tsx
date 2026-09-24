@@ -15,8 +15,11 @@ import { AlertTriangle, CheckCircle2, Upload, Beaker } from "lucide-react";
 import {
   vllmParser,
 } from "@/lib/benchmark-parser-vllm";
+import { sglangParser } from "@/lib/benchmark-parser-sglang";
+import { trtllmParser } from "@/lib/benchmark-parser-trtllm";
 import type {
   BenchmarkRecord,
+  BenchmarkParser,
   CalibrationResult,
 } from "@/lib/benchmark-schema";
 import {
@@ -45,25 +48,37 @@ export function BenchmarkImport({ estimate, modelName, gpuName }: BenchmarkImpor
   const handleParse = () => {
     setError(null);
     if (!rawText.trim()) {
-      setError("Paste a vLLM benchmark JSON output first.");
+      setError("Paste a benchmark JSON output first.");
       return;
     }
 
-    if (vllmParser.detect(rawText)) {
-      const parsed = vllmParser.parse(rawText);
-      if (parsed) {
-        setRecord(parsed);
-        track("imported_benchmark", {
-          engine: "vllm",
-          model: parsed.model_display_name,
-          throughput: parsed.output_token_throughput_tps,
-        });
-        setExpanded(true);
-        return;
+    // Try parsers — order matters: most-specific first, most-generic last.
+    // TRT-LLM has unique field names (first_token_latency_avg, inter_token_latency_avg)
+    // SGLang has unique field names (total_throughput, ttft_avg, itl_avg)
+    // vLLM is most generic (output_throughput, mean_ttft_ms) — try last
+    const parsers: BenchmarkParser[] = [trtllmParser, sglangParser, vllmParser];
+    for (const parser of parsers) {
+      if (parser.detect(rawText)) {
+        const parsed = parser.parse(rawText);
+        if (parsed) {
+          setRecord(parsed);
+          track("imported_benchmark", {
+            engine: parsed.serving_engine,
+            model: parsed.model_display_name,
+            throughput: parsed.output_token_throughput_tps,
+            parser: parser.name,
+          });
+          setExpanded(true);
+          return;
+        }
       }
     }
 
-    setError("Couldn't parse this as vLLM benchmark JSON. Make sure you're pasting the raw JSON output from `vllm benchmark_serving.py`. SGLang and TensorRT-LLM parsers are coming soon.");
+    setError(
+      "Couldn't parse this as vLLM, SGLang, or TensorRT-LLM benchmark JSON. " +
+      "Make sure you're pasting the raw JSON output from the benchmark script. " +
+      "Supported formats: vLLM benchmark_serving.py, SGLang benchmark, TRT-LLM benchmark_serving.py."
+    );
   };
 
   // Compute calibration if we have both estimate and observed data

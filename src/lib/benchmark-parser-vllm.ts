@@ -54,17 +54,17 @@ export const vllmParser: BenchmarkParser = {
   detect(rawText: string): boolean {
     try {
       const data = JSON.parse(rawText);
-      // Check for vLLM-specific fields (any combination)
-      return !!(
-        data &&
-        (data.output_throughput ||
-          data.total_token_throughput ||
-          data.mean_ttft_ms ||
-          data.mean_itl_ms ||
-          data.mean_tpot_ms ||
-          data.num_requests ||
-          data.request_throughput)
-      );
+      // Check for vLLM-specific fields. Require at least 2 to avoid
+      // catching TRT-LLM or SGLang output which may share `num_requests`.
+      const vllmFields = [
+        data.output_throughput,
+        data.total_token_throughput,
+        data.mean_ttft_ms,
+        data.mean_itl_ms,
+        data.mean_tpot_ms,
+        data.request_throughput,
+      ].filter((v) => v !== undefined && v !== null);
+      return vllmFields.length >= 2;
     } catch {
       return false;
     }
