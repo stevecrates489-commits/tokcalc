@@ -51,6 +51,9 @@
       "import": "./dist/server.js"
     },
     "./package.json": "./package.json"
+	},
+    "scripts": {
+      "build": "bun build ./src/index.ts ./src/server.ts --outdir ./dist --target node"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.1",
