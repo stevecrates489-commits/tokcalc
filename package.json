@@ -1,7 +1,8 @@
 {
-  "name": "tokcalc",
-  "version": "0.3.0",
-  "private": true,
+  "name": "@tokcalc/mcp-server",
+  "version": "0.1.3",
+  "mcpName": "io.github.stevecrates489-commits/tokcalc",
+  "private": false,
   "scripts": {
     "dev": "next dev -p 3000 2>&1 | tee dev.log",
     "build": "next build",
@@ -93,4 +94,4 @@
     "tw-animate-css": "^1.3.5",
     "typescript": "^5"
   }
-}
+}   
