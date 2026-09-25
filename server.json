@@ -3,19 +3,25 @@
   "name": "io.github.stevecrates489-commits/tokcalc",
   "title": "TokCalc MCP Server",
   "description": "LLM capacity planning tools to estimate VRAM, compute, latency, and GPU topology for agents.",
-  "version": "0.1.4",
+  "version": "0.2.0-alpha.2",
   "repository": {
     "url": "https://github.com/stevecrates489-commits/tokcalc.git",
     "source": "github"
   },
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://mcp.tokcalc.app/mcp"
+    }
+  ],
   "packages": [
     {
       "registryType": "npm",
       "identifier": "@tokcalc/mcp-server",
-      "version": "0.1.4",
+      "version": "0.2.0-alpha.2",
       "transport": {
         "type": "stdio"
       }
     }
   ]
-}   
+}

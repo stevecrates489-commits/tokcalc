@@ -58,12 +58,23 @@ export const trtllmParser: BenchmarkParser = {
       const meanE2E = data.latency_avg ?? data.e2e_latency_mean;
 
       const numRequests = data.num_requests ?? data.completed ?? 0;
+
+      const totalInPerReq =
+        data.total_input_tokens && numRequests > 0
+          ? data.total_input_tokens / numRequests
+          : undefined;
       const inputLen = Number(
-        data.input_len ?? data.mean_input_len ?? data.total_input_tokens / Math.max(numRequests, 1) ?? 0,
+        data.input_len ?? data.mean_input_len ?? totalInPerReq ?? 0,
       );
+
+      const totalOutPerReq =
+        data.total_output_tokens && numRequests > 0
+          ? data.total_output_tokens / numRequests
+          : undefined;
       const outputLen = Number(
-        data.output_len ?? data.mean_output_len ?? data.total_output_tokens / Math.max(numRequests, 1) ?? 0,
+        data.output_len ?? data.mean_output_len ?? totalOutPerReq ?? 0,
       );
+
       const concurrency = data.concurrency ?? data.num_procs ?? 1;
 
       const confidenceTier: ConfidenceTier =
