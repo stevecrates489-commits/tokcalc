@@ -51,7 +51,7 @@
  *   }
  */
 
-import { NextRequest } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { createMcpServer } from "../../../../mini-services/mcp-server/server";
 import { Ratelimit } from "@upstash/ratelimit";
@@ -112,10 +112,6 @@ function getLimiters(): { anonIp: Ratelimit; authedKey: Ratelimit } | null {
 
 function isAuthEnabled(): boolean {
   return !!process.env.MCP_API_KEY;
-}
-
-function isRateLimitEnabled(): boolean {
-  return !!process.env.UPSTASH_REDIS_REST_URL && !!process.env.UPSTASH_REDIS_REST_TOKEN;
 }
 
 function safeEqual(a: string, b: string): boolean {
@@ -261,7 +257,7 @@ function unauthorized(reason: string): Response {
 }
 
 function tooManyRequests(result: RateLimitResult): Response {
-  const retryAfterSec = Math.max(1, Math.ceil((result.reset * 1000 - Date.now()) / 1000));
+  const retryAfterSec = Math.max(1, Math.ceil((result.reset - Date.now()) / 1000));
   return mcpError(429, -32002, "Too Many Requests",
     `Rate limit exceeded on bucket "${result.bucket}". Try again in ${retryAfterSec} second${retryAfterSec === 1 ? "" : "s"}.`,
     {
@@ -297,7 +293,7 @@ export async function POST(req: NextRequest): Promise<Response> {
     return tooManyRequests(rateLimitResult);
   }
 
-  // ── BODY PARSE (with size limit) ──
+  // ── BODY PARSE (Sanitized & Size Checked) ──
   const contentLength = Number(req.headers.get("content-length") ?? 0);
   if (contentLength > MAX_BODY_BYTES) {
     return mcpError(413, -32600, "Payload Too Large",
@@ -306,11 +302,13 @@ export async function POST(req: NextRequest): Promise<Response> {
 
   let body: unknown;
   try {
-    const bodyText = await req.text();
-    if (!bodyText.trim()) {
+    const rawText = await req.text();
+    const cleanedText = rawText.trim().replace(/^\uFEFF/, ""); // Strip UTF-8 BOM and trimming
+
+    if (!cleanedText) {
       return mcpError(400, -32600, "Empty request body", "Body must be a JSON-RPC 2.0 message.");
     }
-    body = JSON.parse(bodyText);
+    body = JSON.parse(cleanedText);
   } catch (err) {
     return mcpError(400, -32600, "Invalid JSON body",
       err instanceof Error ? err.message : String(err));
@@ -326,7 +324,7 @@ export async function POST(req: NextRequest): Promise<Response> {
 
     // SDK handles the JSON-RPC request/response cycle
     const response = await transport.handleRequest(req, body as Record<string, unknown>);
-    return response;
+    return response as Response;
   } catch (err) {
     console.error("[tokcalc-mcp/api] Transport error:", err);
     return mcpError(500, -32603, "Internal server error",
