@@ -34,6 +34,15 @@ export default function McpDocsPage() {
     setTimeout(() => setCopied(null), 1500);
   };
 
+  const cursorHostedConfig = `{
+  "mcpServers": {
+    "tokcalc": {
+      "url": "https://tokcalc.vercel.app/api/mcp",
+      "headers": { "Authorization": "Bearer <your-api-key>" }
+    }
+  }
+}`;
+
   const cursorConfig = `{
   "mcpServers": {
     "tokcalc": {
@@ -70,7 +79,7 @@ PORT=8080 tokcalc-mcp-http`;
         <div className="mb-8">
           <div className="flex items-center gap-3 mb-3">
             <h1 className="text-3xl sm:text-4xl font-bold tracking-tight">tokcalc MCP Server</h1>
-            <Badge className="bg-emerald-500/10 text-emerald-600 border-emerald-500/30 text-[10px]">v0.2.0-alpha.1</Badge>
+            <Badge className="bg-emerald-500/10 text-emerald-600 border-emerald-500/30 text-[10px]">v0.2.0</Badge>
           </div>
           <p className="text-muted-foreground text-sm sm:text-base leading-relaxed">
             7 read-only planning tools for AI agents (Cursor, Claude Desktop, Cline). Ask your AI:
@@ -147,16 +156,60 @@ PORT=8080 tokcalc-mcp-http`;
           </CardContent>
         </Card>
 
-        {/* Install — HTTP (alpha) */}
-        <Card className="border-border/60 shadow-sm mb-8">
+        {/* Install — Public hosted endpoint (v0.2.0 final) */}
+        <Card className="border-emerald-500/30 shadow-sm mb-8">
           <CardHeader>
             <CardTitle className="text-base flex items-center gap-2">
               <Zap className="size-4 text-emerald-500" />
-              Self-hosted HTTP transport (v0.2.0-alpha.1)
+              Use the public hosted endpoint (v0.2.0 — recommended)
             </CardTitle>
             <CardDescription className="text-xs">
-              For agent platforms that need HTTP transport (no local <code>npx</code>). Stateless mode —
-              no sessions, no SSE stream, no auth in alpha.1.
+              No <code>npx</code> install needed — point your AI agent directly at the public URL.
+              Backed by bearer API key auth + Upstash Redis rate limiting.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <p className="text-xs text-muted-foreground">
+              <strong className="text-foreground">Public endpoint:</strong>{" "}
+              <code className="font-mono text-emerald-500">https://tokcalc.vercel.app/api/mcp</code>
+            </p>
+            <p className="text-xs text-muted-foreground">
+              Add to your Cursor / Claude Desktop config:
+            </p>
+            <div className="relative">
+              <pre className="bg-muted rounded-md p-3 text-xs font-mono overflow-x-auto border border-border/60"><code>{cursorHostedConfig}</code></pre>
+              <Button
+                size="sm"
+                variant="ghost"
+                className="absolute top-2 right-2 text-[10px]"
+                onClick={() => copyToClipboard(cursorHostedConfig, "cursor-hosted")}
+              >
+                {copied === "cursor-hosted" ? "✓ Copied" : "Copy"}
+              </Button>
+            </div>
+            <p className="text-xs text-muted-foreground mt-3">
+              <strong className="text-foreground">Get an API key:</strong> Email{" "}
+              <a href="mailto:hello@tokcalc.vercel.app?subject=MCP%20API%20key%20request" className="text-emerald-500 hover:underline">hello@tokcalc.vercel.app</a>{" "}
+              with subject "MCP API key request" and we&apos;ll send you a key within 24 hours.
+            </p>
+            <div className="text-[11px] text-emerald-600 dark:text-emerald-400 flex items-start gap-1.5 mt-2">
+              <span className="font-medium">✓ Production-safe:</span>
+              <span>v0.2.0 is bearer-authenticated (constant-time comparison) and rate-limited
+              (30/min per IP anonymous, 120/min per API key). Safe for public exposure.</span>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Install — Self-hosted HTTP (for power users) */}
+        <Card className="border-border/60 shadow-sm mb-8">
+          <CardHeader>
+            <CardTitle className="text-base flex items-center gap-2">
+              <Terminal className="size-4 text-emerald-500" />
+              Self-host the HTTP server (advanced)
+            </CardTitle>
+            <CardDescription className="text-xs">
+              For air-gapped deployments, custom rate limits, or running on your own infra.
+              Same code as the public endpoint — just on your own server.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
@@ -185,10 +238,11 @@ PORT=8080 tokcalc-mcp-http`;
                 {copied === "curl" ? "✓ Copied" : "Copy"}
               </Button>
             </div>
-            <div className="text-[11px] text-amber-600 dark:text-amber-400 flex items-start gap-1.5 mt-2">
-              <span className="font-medium">⚠ Alpha scope:</span>
-              <span>v0.2.0-alpha.1 has NO authentication or rate limiting. Do NOT expose to the public internet.
-              Bearer API key + KV-backed rate limits arrive in v0.2.0-beta.1.</span>
+            <div className="text-[11px] text-emerald-600 dark:text-emerald-400 flex items-start gap-1.5 mt-2">
+              <span className="font-medium">✓ Self-hosted:</span>
+              <span>v0.2.0 includes bearer API key auth + Upstash Redis rate limiting.
+              Set <code>MCP_API_KEY</code>, <code>UPSTASH_REDIS_REST_URL</code>, and <code>UPSTASH_REDIS_REST_TOKEN</code>
+              env vars before deploying to your own server.</span>
             </div>
           </CardContent>
         </Card>
@@ -230,24 +284,17 @@ PORT=8080 tokcalc-mcp-http`;
               </div>
             </div>
             <div className="flex items-start gap-3">
-              <Badge className="bg-amber-500/10 text-amber-600 border-amber-500/30 text-[9px] shrink-0">alpha</Badge>
+              <Badge className="bg-emerald-500/10 text-emerald-600 border-emerald-500/30 text-[9px] shrink-0">✓ shipped</Badge>
               <div>
-                <div className="font-medium">v0.2.0-alpha.1 — stateless HTTP transport</div>
-                <div className="text-muted-foreground">For agent platforms that need HTTP. No auth yet — local testing only.</div>
+                <div className="font-medium">v0.2.0-alpha.1 → beta.1 — HTTP transport + auth + rate limit</div>
+                <div className="text-muted-foreground">Stateless Streamable HTTP + bearer API key + Upstash Redis rate limiting</div>
               </div>
             </div>
             <div className="flex items-start gap-3">
-              <Badge variant="outline" className="text-[9px] shrink-0">next</Badge>
-              <div>
-                <div className="font-medium">v0.2.0-beta.1 — bearer API key + rate limiting</div>
-                <div className="text-muted-foreground">Public deploy-safe. KV-backed rate limits per IP / per key.</div>
-              </div>
-            </div>
-            <div className="flex items-start gap-3">
-              <Badge variant="outline" className="text-[9px] shrink-0">v0.2.0</Badge>
+              <Badge className="bg-emerald-500/10 text-emerald-600 border-emerald-500/30 text-[9px] shrink-0">✓ shipped</Badge>
               <div>
                 <div className="font-medium">v0.2.0 — public hosted endpoint</div>
-                <div className="text-muted-foreground">mcp.tokcalc.app — no install needed for hosted clients</div>
+                <div className="text-muted-foreground">Live at tokcalc.vercel.app/api/mcp — no install needed</div>
               </div>
             </div>
             <div className="flex items-start gap-3">
@@ -310,8 +357,8 @@ PORT=8080 tokcalc-mcp-http`;
               applicationCategory: "DeveloperApplication",
               operatingSystem: "Cross-platform (Node.js 18+)",
               offers: { "@type": "Offer", price: "0", priceCurrency: "USD" },
-              description: "Open-source MCP server for AI agents with 7 read-only LLM capacity planning tools. Supports stdio and HTTP transports.",
-              version: "0.2.0-alpha.1",
+              description: "Open-source MCP server for AI agents with 7 read-only LLM capacity planning tools. Supports stdio + HTTP + hosted endpoint at tokcalc.vercel.app/api/mcp.",
+              version: "0.2.0",
               license: "https://www.apache.org/licenses/LICENSE-2.0",
               url: "https://tokcalc.vercel.app/mcp",
               downloadUrl: "https://www.npmjs.com/package/@tokcalc/mcp-server",

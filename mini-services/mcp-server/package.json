@@ -1,7 +1,7 @@
 {
   "name": "@tokcalc/mcp-server",
-  "version": "0.2.0-beta.1",
-  "description": "tokcalc MCP server — open-source LLM serving capacity planner for AI agents. v0.2.0-beta.1: stdio + stateless HTTP transport with bearer API key auth + KV-backed rate limiting. 7 read-only tools: estimate_capacity, compare_gpus, recommend_topology, estimate_api_vs_self_host, list_models, list_gpus, get_mlperf_benchmarks.",
+  "version": "0.2.0",
+  "description": "tokcalc MCP server — open-source LLM serving capacity planner for AI agents. v0.2.0: stdio + stateless HTTP transport with bearer API key auth + KV-backed rate limiting + public hosted endpoint. 7 read-only tools: estimate_capacity, compare_gpus, recommend_topology, estimate_api_vs_self_host, list_models, list_gpus, get_mlperf_benchmarks.",
   "type": "module",
   "license": "Apache-2.0",
   "bin": {
@@ -33,6 +33,12 @@
   "homepage": "https://tokcalc.vercel.app",
   "engines": {
     "node": ">=18"
+  },
+  "exports": {
+    ".": "./dist/server.js",
+    "./server": "./dist/server.js",
+    "./server.js": "./dist/server.js",
+    "./package.json": "./package.json"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.1",
