@@ -12,7 +12,7 @@
 
 import { NextRequest } from "next/server";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
-import { createMcpServer } from "@tokcalc/mcp-server";
+import { createMcpServer } from "@tokcalc/mcp-server/server.js";
 import { Ratelimit } from "@upstash/ratelimit";
 import { Redis } from "@upstash/redis";
 import crypto from "node:crypto";
