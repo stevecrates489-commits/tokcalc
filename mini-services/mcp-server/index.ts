@@ -1,13 +1,15 @@
+#!/usr/bin/env node   
 /**
  * tokcalc MCP Server — local stdio transport.
  *
- * Exposes 6 read-only planning tools for AI agents (Cursor, Claude Desktop, Cline):
+ * Exposes 7 read-only planning tools for AI agents (Cursor, Claude Desktop, Cline):
  *   1. estimate_capacity — VRAM/KV/throughput/latency/cost for one config
  *   2. compare_gpus — ranked GPU comparison for one workload
  *   3. recommend_topology — TP/CP topology recommendation
  *   4. estimate_api_vs_self_host — break-even analysis
  *   5. list_models — discover supported model IDs
  *   6. list_gpus — discover supported GPU IDs
+ *   7. get_mlperf_benchmarks — curated MLPerf v4.1 reference configs
  */
 
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
@@ -38,7 +40,10 @@ import {
   type Quantization,
 } from "../../src/lib/token-calc.ts";
 
-// Helper function to format Zod schema for MCP protocol compliance (Strips $schema meta-tag)
+// Import MLPerf curated reference configs (shared with the web app)
+import { MLPERF_CURATED } from "../../src/lib/mlperf-curated.ts";
+
+// Helper function to format Zod schema for MCP protocol compliance (Strips $schema meta-tag & resolves refs)
 function formatInputSchema(schema: z.ZodTypeAny) {
   const json = zodToJsonSchema(schema, {
     target: "jsonSchema7",
@@ -119,6 +124,12 @@ const ListGpusSchema = z.object({
   vendor: z.string().optional().describe("Filter by vendor (e.g. 'NVIDIA', 'AMD')"),
   category: z.enum(["datacenter","workstation","consumer","mac","tpu","lpu","wse","legacy"]).optional(),
   minVramGb: z.number().optional(),
+});
+
+const GetMlperfBenchmarksSchema = z.object({
+  gpuModel: z.string().optional().describe("Filter by GPU model substring (e.g. 'H100', 'H200', 'A100')"),
+  workload: z.string().optional().describe("Filter by model ID substring (e.g. 'llama3-70b', 'llama3-8b')"),
+  scenario: z.enum(["Offline", "Server"]).optional().describe("Filter by MLPerf scenario"),
 });
 
 // ============================================================
@@ -378,6 +389,41 @@ function handleListGpus(input: z.infer<typeof ListGpusSchema>) {
   };
 }
 
+function handleGetMlperfBenchmarks(input: z.infer<typeof GetMlperfBenchmarksSchema>) {
+  let results = MLPERF_CURATED;
+  if (input.gpuModel) {
+    const q = input.gpuModel.toLowerCase();
+    results = results.filter(r => r.accelerator_model?.toLowerCase().includes(q));
+  }
+  if (input.workload) {
+    const q = input.workload.toLowerCase();
+    results = results.filter(r => r.model_id.toLowerCase().includes(q));
+  }
+  if (input.scenario) {
+    results = results.filter(r => r.comparability_group?.includes(input.scenario!));
+  }
+  return {
+    count: results.length,
+    benchmarks: results.map(r => ({
+      system: r.instance_type,
+      model: r.model_display_name,
+      quantization: r.quantization_format,
+      gpuCount: r.gpu_count,
+      gpu: r.accelerator_model,
+      scenario: r.comparability_group,
+      throughput_tps: r.output_token_throughput_tps,
+      ttft_ms: r.ttft_mean_ms,
+      itl_ms: r.itl_mean_ms,
+      confidence_tier: r.confidence_tier,
+      verification: r.verification_status,
+      citation: r.citation_text,
+      source_url: r.source_url,
+    })),
+    note: "Throughput values are COMPUTED by tokcalc formulas (confidence_tier=derived). System configurations are sourced from MLPerf Inference v4.1 audited submissions.",
+    catalogVersion: "0.3.0",
+  };
+}
+
 // ============================================================
 // TOOL DEFINITIONS
 // ============================================================
@@ -413,6 +459,11 @@ const TOOL_DEFINITIONS = [
     description: "List GPU and cloud SKU IDs, memory, bandwidth, pricing, and categories.",
     inputSchema: formatInputSchema(ListGpusSchema),
   },
+  {
+    name: "get_mlperf_benchmarks",
+    description: "Retrieve curated MLPerf Inference v4.1 LLM benchmark reference configurations. Throughput is computed by tokcalc formulas (confidence_tier=derived). Use to cross-validate theoretical estimates against audited system configurations.",
+    inputSchema: formatInputSchema(GetMlperfBenchmarksSchema),
+  },
 ];
 
 // ============================================================
@@ -420,7 +471,7 @@ const TOOL_DEFINITIONS = [
 // ============================================================
 
 const server = new Server(
-  { name: "tokcalc", version: "0.1.2" },
+  { name: "tokcalc", version: "0.1.3" },
   {
     capabilities: {
       tools: {},
@@ -471,6 +522,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         result = handleListGpus(input);
         break;
       }
+      case "get_mlperf_benchmarks": {
+        const input = GetMlperfBenchmarksSchema.parse(args);
+        result = handleGetMlperfBenchmarks(input);
+        break;
+      }
       default:
         return {
           content: [{ type: "text", text: `Unknown tool: ${name}` }],
@@ -501,4 +557,4 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 const transport = new StdioServerTransport();
 await server.connect(transport);
 
-console.error("tokcalc MCP server started (stdio transport) — 6 tools available");
+console.error("tokcalc MCP server started (stdio transport) — 7 tools available");
