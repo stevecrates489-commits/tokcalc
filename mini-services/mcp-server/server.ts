@@ -495,7 +495,7 @@ const TOOL_DEFINITIONS = [
  */
 export function createMcpServer(): Server {
   const server = new Server(
-    { name: "tokcalc", version: "0.2.0-alpha.1" },
+    { name: "tokcalc", version: "0.2.0-beta.1" },
     {
       capabilities: {
         tools: {},
