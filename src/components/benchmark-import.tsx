@@ -11,7 +11,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
-import { AlertTriangle, CheckCircle2, Upload, Beaker, Download } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Upload, Beaker, Download, Database } from "lucide-react";
 import {
   vllmParser,
 } from "@/lib/benchmark-parser-vllm";
@@ -30,6 +30,7 @@ import {
 import type { CalcResult } from "@/lib/token-calc";
 import { fmtTokens, fmtMs } from "@/lib/token-calc";
 import { track } from "@/lib/track";
+import { MLPERF_CURATED } from "@/lib/mlperf-curated";
 
 interface BenchmarkImportProps {
   /** The theoretical estimate from tokcalc's formulas */
@@ -45,6 +46,7 @@ export function BenchmarkImport({ estimate, modelName, gpuName }: BenchmarkImpor
   const [record, setRecord] = useState<BenchmarkRecord | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState(false);
+  const [showMlperf, setShowMlperf] = useState(false);
 
   const handleParse = () => {
     setError(null);
@@ -102,7 +104,7 @@ export function BenchmarkImport({ estimate, modelName, gpuName }: BenchmarkImpor
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
-        {!record && !expanded && (
+        {!record && !expanded && !showMlperf && (
           <div className="flex flex-col sm:flex-row gap-2">
             <Button
               variant="outline"
@@ -112,6 +114,15 @@ export function BenchmarkImport({ estimate, modelName, gpuName }: BenchmarkImpor
             >
               <Upload className="size-3.5" />
               Import a benchmark result
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setShowMlperf(true)}
+              className="flex-1 gap-1.5"
+            >
+              <Database className="size-3.5" />
+              MLPerf references ({MLPERF_CURATED.length})
             </Button>
             <Button
               variant="ghost"
@@ -133,6 +144,28 @@ export function BenchmarkImport({ estimate, modelName, gpuName }: BenchmarkImpor
               <Download className="size-3.5" />
               Download template
             </Button>
+          </div>
+        )}
+
+        {/* MLPerf reference configs */}
+        {showMlperf && !record && (
+          <div className="space-y-2">
+            <div className="text-[10px] text-muted-foreground">
+              MLPerf Inference v4.1 audited system configurations. Throughput computed by tokcalc formulas (confidence: derived).
+            </div>
+            {MLPERF_CURATED.map((r, i) => (
+              <button key={i} onClick={() => { setRecord(r); setShowMlperf(false); setExpanded(true); track("loaded_mlperf_reference", { system: r.instance_type }); }}
+                className="w-full text-left p-3 rounded-md border border-border/60 hover:border-emerald-500 hover:bg-emerald-500/5 transition-colors">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-medium">{r.instance_type}</span>
+                  <Badge variant="outline" className="text-[9px]">{r.confidence_tier}</Badge>
+                </div>
+                <div className="text-[10px] text-muted-foreground mt-1">
+                  {r.model_display_name} · {r.quantization_format} · {r.gpu_count}× GPU · {r.output_token_throughput_tps.toLocaleString()} tok/s (computed)
+                </div>
+              </button>
+            ))}
+            <Button variant="ghost" size="sm" onClick={() => setShowMlperf(false)} className="text-xs">Back</Button>
           </div>
         )}
 
@@ -257,7 +290,7 @@ export function BenchmarkImport({ estimate, modelName, gpuName }: BenchmarkImpor
             <Button
               size="sm"
               variant="ghost"
-              onClick={() => { setRecord(null); setRawText(""); setExpanded(false); }}
+              onClick={() => { setRecord(null); setRawText(""); setExpanded(false); setShowMlperf(false); }}
               className="text-xs"
             >
               Import a different benchmark
