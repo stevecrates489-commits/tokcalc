@@ -126,7 +126,7 @@ export async function GET() {
         serviceRegions?: string[];
         geoTaxonomy?: { regions?: string[] };
       }>;
-      nextPagePageToken?: string;
+      nextPageToken?: string;
     };
 
     const skus = skusData.skus || [];

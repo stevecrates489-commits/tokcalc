@@ -178,21 +178,17 @@ export default function Home() {
   const [cacheProvider, setCacheProvider] = useState<"self-hosted" | "anthropic" | "openai">("self-hosted");
 
   // === URL-share state (Phase A) ===
-  // Track whether we've restored state from URL — prevents the write effect
-  // from clobbering the URL on first mount before we've read it.
   const [urlRestored, setUrlRestored] = useState(false);
   const [shareCopied, setShareCopied] = useState(false);
   const [markdownCopied, setMarkdownCopied] = useState(false);
   const { toast } = useToast();
 
   // ---- One-time mount: read URL hash and restore state ----
-  // Priority: URL hash > localStorage > defaults
   useEffect(() => {
     /* eslint-disable react-hooks/set-state-in-effect */
     if (typeof window === "undefined") return;
     const hash = window.location.hash;
     if (!hash || hash === "#") {
-      // No URL hash — try localStorage for last-saved session
       const stored = loadCalcFromStorage();
       if (stored) {
         if (stored.modelId) setModelId(stored.modelId);
@@ -250,9 +246,8 @@ export default function Home() {
     /* eslint-enable react-hooks/set-state-in-effect */
   }, []);
 
-  // ---- Continuous: when Calculator state changes, update URL hash + localStorage ----
   useEffect(() => {
-    if (!urlRestored) return; // wait until we've read the initial URL
+    if (!urlRestored) return;
     const state: CalcTabState = {
       modelId, gpuId, quantization, numGpus, batchSize,
       promptTokens, outputTokens, gpuHourlyCost,
@@ -263,7 +258,7 @@ export default function Home() {
     if (activeTab === "calculator") {
       writeUrlHash(serializeCalcState(state));
     }
-    saveCalcToStorage(state); // always persist to localStorage
+    saveCalcToStorage(state);
   }, [
     urlRestored, activeTab,
     modelId, gpuId, quantization, numGpus, batchSize, promptTokens, outputTokens,
@@ -272,12 +267,9 @@ export default function Home() {
     cacheTTL, cacheProvider,
   ]);
 
-  // ---- Share button handler ----
   const handleShare = async () => {
-    // Track: high-signal event — user found something worth sharing
     track("shared_scenario", { tab: activeTab });
 
-    // For Calculator tab, force a fresh write to be safe.
     if (activeTab === "calculator") {
       const state: CalcTabState = {
         modelId, gpuId, quantization, numGpus, batchSize,
@@ -288,8 +280,6 @@ export default function Home() {
       };
       writeUrlHash(serializeCalcState(state));
     }
-    // MUST stay in the user-gesture call stack for clipboard permission.
-    // (setTimeout would break the gesture chain — verified painful.)
     const ok = await copyCurrentUrlToClipboard();
     if (ok) {
       setShareCopied(true);
@@ -303,8 +293,6 @@ export default function Home() {
       });
       setTimeout(() => setShareCopied(false), 2000);
     } else {
-      // Clipboard write failed (e.g., headless browser or no permission).
-      // Fallback: select the URL bar via document.execCommand('copy').
       try {
         const urlInput = document.createElement("input");
         urlInput.value = window.location.href;
@@ -321,8 +309,96 @@ export default function Home() {
     }
   };
 
-  // Copy the current calculation result as a Markdown snippet
-  // (useful for pasting into GitHub issues, Slack, docs).
+  const input: CalcInput = {
+    modelId,
+    gpuId,
+    quantization,
+    numGpus,
+    batchSize,
+    promptTokens,
+    outputTokens,
+    gpuHourlyCost: gpuHourlyCost === "" ? undefined : Number(gpuHourlyCost),
+    useSpeculative,
+    speculativeBoost,
+    useContinuousBatching,
+    continuousBatchingMultiplier,
+    reasoningTokens,
+    cachePrefixTokens,
+    cacheHitRate,
+    cacheTTL,
+    cacheProvider,
+  };
+
+  const result = useMemo(() => calculate(input), [
+    modelId, gpuId, quantization, numGpus, batchSize, promptTokens,
+    outputTokens, gpuHourlyCost, useSpeculative, speculativeBoost,
+    useContinuousBatching, continuousBatchingMultiplier, reasoningTokens,
+    cachePrefixTokens, cacheHitRate, cacheTTL, cacheProvider,
+  ]);
+
+  const chartData = useMemo(() => {
+    return [1, 2, 4, 8, 16, 32, 64].map((b) => {
+      const r = calculate({ ...input, batchSize: b });
+      return {
+        batch: `B=${b}`,
+        tokens: Math.round(r.aggregateTokensPerSec),
+        fits: r.vramFits,
+      };
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [modelId, gpuId, quantization, numGpus, promptTokens, outputTokens, useSpeculative, speculativeBoost, gpuHourlyCost]);
+
+  const gpuCompareData = useMemo(() => {
+    const model = MODELS.find((m) => m.id === modelId)!;
+    const candidates = GPUS.filter((g) => {
+      const modelSizeGb = model.activeParamsB * QUANTIZATIONS.find((q) => q.id === quantization)!.bytesPerParam;
+      return g.vramGb * numGpus >= modelSizeGb;
+    });
+    return candidates.map((g) => {
+      const r = calculate({ ...input, gpuId: g.id });
+      return {
+        gpu: g.name.replace(/\s+\d+GB$/, "").replace(" SXM5", "").replace(" SXM4", ""),
+        tokens: Math.round(r.decodeTokensPerSec),
+      };
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [modelId, quantization, numGpus]);
+
+  const longContextData = useMemo(() => {
+    const model = MODELS.find((m) => m.id === modelId)!;
+    const gpu = GPUS.find((g) => g.id === gpuId)!;
+    const quant = QUANTIZATIONS.find((q) => q.id === quantization)!;
+    const ctxSizes = [4096, 8192, 16384, 32768, 65536, 131072, 262144, 524288, 1048576];
+    return ctxSizes
+      .filter(ctx => ctx <= model.maxContext)
+      .map(ctx => {
+        const maxConcurrent = computeMaxConcurrency(model, gpu, numGpus, ctx, quant.bytesPerParam);
+        const prefillMs = computeLongContextPrefillMs(model, result.effectiveFlopsTflops, ctx);
+        const kvGb = computeKVCacheGb(model, ctx, 1);
+        return {
+          context: fmtContext(ctx),
+          contextTokens: ctx,
+          maxConcurrent,
+          prefillMs,
+          kvGb,
+        };
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [modelId, gpuId, numGpus, quantization, result.effectiveFlopsTflops]);
+
+  const topologyRec = useMemo(() => {
+    const model = MODELS.find((m) => m.id === modelId)!;
+    const gpu = GPUS.find((g) => g.id === gpuId)!;
+    const quant = QUANTIZATIONS.find((q) => q.id === quantization)!;
+    const totalContext = promptTokens + (cachePrefixTokens ?? 0);
+    return recommendTopology(model, gpu, totalContext, batchSize, quant.bytesPerParam);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [modelId, gpuId, numGpus, quantization, promptTokens, cachePrefixTokens, batchSize]);
+
+  const selectedGpu = GPUS.find((g) => g.id === gpuId)!;
+  const selectedModel = MODELS.find((m) => m.id === modelId)!;
+  const selectedQuant = QUANTIZATIONS.find((q) => q.id === quantization)!;
+
   const handleCopyMarkdown = async () => {
     const model = selectedModel;
     const gpu = GPUS.find((g) => g.id === gpuId);
@@ -366,105 +442,9 @@ export default function Home() {
     }
   };
 
-  const input: CalcInput = {
-    modelId,
-    gpuId,
-    quantization,
-    numGpus,
-    batchSize,
-    promptTokens,
-    outputTokens,
-    gpuHourlyCost: gpuHourlyCost === "" ? undefined : Number(gpuHourlyCost),
-    useSpeculative,
-    speculativeBoost,
-    useContinuousBatching,
-    continuousBatchingMultiplier,
-    reasoningTokens,
-    cachePrefixTokens,
-    cacheHitRate,
-    cacheTTL,
-    cacheProvider,
-  };
-
-  const result = useMemo(() => calculate(input), [
-    modelId, gpuId, quantization, numGpus, batchSize, promptTokens,
-    outputTokens, gpuHourlyCost, useSpeculative, speculativeBoost,
-    useContinuousBatching, continuousBatchingMultiplier, reasoningTokens,
-    cachePrefixTokens, cacheHitRate, cacheTTL, cacheProvider,
-  ]);
-
-  // Chart data — vary batch size from 1 to 32
-  const chartData = useMemo(() => {
-    return [1, 2, 4, 8, 16, 32, 64].map((b) => {
-      const r = calculate({ ...input, batchSize: b });
-      return {
-        batch: `B=${b}`,
-        tokens: Math.round(r.aggregateTokensPerSec),
-        fits: r.vramFits,
-      };
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [modelId, gpuId, quantization, numGpus, promptTokens, outputTokens, useSpeculative, speculativeBoost, gpuHourlyCost]);
-
-  // Compare GPUs chart — show same model on different GPUs
-  const gpuCompareData = useMemo(() => {
-    const model = MODELS.find((m) => m.id === modelId)!;
-    // only include GPUs that have enough VRAM for the model
-    const candidates = GPUS.filter((g) => {
-      const modelSizeGb = model.activeParamsB * QUANTIZATIONS.find((q) => q.id === quantization)!.bytesPerParam;
-      return g.vramGb * numGpus >= modelSizeGb;
-    });
-    return candidates.map((g) => {
-      const r = calculate({ ...input, gpuId: g.id });
-      return {
-        gpu: g.name.replace(/\s+\d+GB$/, "").replace(" SXM5", "").replace(" SXM4", ""),
-        tokens: Math.round(r.decodeTokensPerSec),
-      };
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [modelId, quantization, numGpus]);
-
-  // Long-context sweep — show max concurrency across 4K → 1M context
-  const longContextData = useMemo(() => {
-    const model = MODELS.find((m) => m.id === modelId)!;
-    const gpu = GPUS.find((g) => g.id === gpuId)!;
-    const quant = QUANTIZATIONS.find((q) => q.id === quantization)!;
-    const ctxSizes = [4096, 8192, 16384, 32768, 65536, 131072, 262144, 524288, 1048576];
-    return ctxSizes
-      .filter(ctx => ctx <= model.maxContext)
-      .map(ctx => {
-        const maxConcurrent = computeMaxConcurrency(model, gpu, numGpus, ctx, quant.bytesPerParam);
-        const prefillMs = computeLongContextPrefillMs(model, result.effectiveFlopsTflops, ctx);
-        const kvGb = computeKVCacheGb(model, ctx, 1);
-        return {
-          context: fmtContext(ctx),
-          contextTokens: ctx,
-          maxConcurrent,
-          prefillMs,
-          kvGb,
-        };
-      });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [modelId, gpuId, numGpus, quantization, result.effectiveFlopsTflops]);
-
-  // Topology recommendation at current context
-  const topologyRec = useMemo(() => {
-    const model = MODELS.find((m) => m.id === modelId)!;
-    const gpu = GPUS.find((g) => g.id === gpuId)!;
-    const quant = QUANTIZATIONS.find((q) => q.id === quantization)!;
-    const totalContext = promptTokens + (cachePrefixTokens ?? 0);
-    return recommendTopology(model, gpu, totalContext, batchSize, quant.bytesPerParam);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [modelId, gpuId, numGpus, quantization, promptTokens, cachePrefixTokens, batchSize]);
-
-  const selectedGpu = GPUS.find((g) => g.id === gpuId)!;
-  const selectedModel = MODELS.find((m) => m.id === modelId)!;
-  const selectedQuant = QUANTIZATIONS.find((q) => q.id === quantization)!;
-
   return (
     <TooltipProvider delayDuration={200}>
     <div className="min-h-screen flex flex-col bg-background text-foreground">
-      {/* Header */}
       <header className="border-b border-border/60 backdrop-blur-sm sticky top-0 z-50 bg-background/80">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 py-4 flex items-center justify-between">
           <div className="flex items-center gap-2.5">
@@ -538,10 +518,8 @@ export default function Home() {
         </div>
       </header>
 
-      {/* Main */}
       <main className="flex-1">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 py-8 sm:py-12">
-          {/* Hero */}
           <div className="mb-8 sm:mb-10 max-w-4xl">
             <div className="flex flex-wrap items-center gap-2 mb-3">
               <h2 className="text-3xl sm:text-4xl font-bold tracking-tight leading-tight">
@@ -574,7 +552,6 @@ export default function Home() {
             </div>
           </div>
 
-          {/* What can tokcalc answer? */}
           <div className="mb-8 grid grid-cols-1 md:grid-cols-2 gap-3">
             <div className="p-4 rounded-lg border border-border/60 bg-muted/20">
               <div className="text-[10px] uppercase tracking-wider text-emerald-500 font-semibold mb-2">
@@ -600,7 +577,6 @@ export default function Home() {
             </div>
           </div>
 
-          {/* Top-level tab switcher */}
           <div className="mb-6 border-b border-border/60">
             <div className="flex gap-1 -mb-px overflow-x-auto">
               {([
@@ -615,7 +591,6 @@ export default function Home() {
                     key={tab.id}
                     onClick={() => {
                       setActiveTab(tab.id);
-                      // Track: which tab users switch to (signals which workflow matters most)
                       track("switched_tab", { tab: tab.id });
                     }}
                     className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
@@ -632,7 +607,6 @@ export default function Home() {
             </div>
           </div>
 
-          {/* ===== CALCULATOR TAB ===== */}
           {activeTab === "calculator" && (
             <>
           {/* Calculator grid */}
@@ -735,7 +709,6 @@ export default function Home() {
                     <Stat label="Memory size" value={`${selectedGpu.vramGb} GB`} term="vram" />
                   </div>
 
-                  {/* Multi-GPU */}
                   <div className="pt-2">
                     <div className="flex items-center justify-between mb-2">
                       <Label className="text-xs flex items-center gap-1">
@@ -903,7 +876,6 @@ export default function Home() {
 
                   <Separator />
 
-                  {/* === Phase 2: Continuous batching === */}
                   <div className="flex items-center justify-between">
                     <div>
                       <Label className="text-xs flex items-center gap-1">
@@ -939,7 +911,6 @@ export default function Home() {
                     </div>
                   )}
 
-                  {/* === Phase 2: Reasoning tokens === */}
                   <div>
                     <Label className="text-xs flex items-center gap-1">
                       Hidden reasoning tokens
@@ -962,7 +933,6 @@ export default function Home() {
 
                   <Separator />
 
-                  {/* === Phase 2: Prompt caching === */}
                   <div className="flex items-center justify-between">
                     <div>
                       <Label className="text-xs flex items-center gap-1">
@@ -1044,7 +1014,6 @@ export default function Home() {
 
             {/* ===== RESULTS ===== */}
             <div className="lg:col-span-7 space-y-4">
-              {/* Headline numbers */}
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                 <HeadlineCard
                   icon={<Gauge className="size-4" />}
@@ -1081,7 +1050,6 @@ export default function Home() {
                 />
               </div>
 
-              {/* Long-context warning */}
               {result.longContextWarning && (
                 <div className="flex items-start gap-3 p-3 rounded-lg border border-blue-500/30 bg-blue-500/5">
                   <Info className="size-4 text-blue-500 shrink-0 mt-0.5" />
@@ -1096,7 +1064,6 @@ export default function Home() {
                 </div>
               )}
 
-              {/* Reasoning tokens callout */}
               {reasoningTokens > 0 && (
                 <div className="flex items-start gap-3 p-3 rounded-lg border border-amber-500/30 bg-amber-500/5">
                   <AlertTriangle className="size-4 text-amber-500 shrink-0 mt-0.5" />
@@ -1113,7 +1080,6 @@ export default function Home() {
                 </div>
               )}
 
-              {/* Cache savings callout */}
               {cachePrefixTokens > 0 && result.cacheSavingsPct > 0 && (
                 <div className="flex items-start gap-3 p-3 rounded-lg border border-emerald-500/30 bg-emerald-500/5">
                   <Zap className="size-4 text-emerald-500 shrink-0 mt-0.5" />
@@ -1135,7 +1101,6 @@ export default function Home() {
                 </div>
               )}
 
-              {/* VRAM warning */}
               {!result.vramFits && (
                 <div className="flex items-start gap-3 p-3 rounded-lg border border-amber-500/30 bg-amber-500/5">
                   <AlertTriangle className="size-4 text-amber-500 shrink-0 mt-0.5" />
@@ -1152,7 +1117,6 @@ export default function Home() {
                 </div>
               )}
 
-              {/* Memory & Compute breakdown */}
               <Card className="border-border/60 shadow-sm">
                 <CardHeader className="pb-3">
                   <CardTitle className="text-sm flex items-center gap-2">
@@ -1192,7 +1156,6 @@ export default function Home() {
                     />
                   </div>
 
-                  {/* VRAM usage bar */}
                   <div className="pt-1">
                     <div className="flex items-center justify-between text-[11px] mb-1.5">
                       <span className="text-muted-foreground">Memory used</span>
@@ -1214,7 +1177,6 @@ export default function Home() {
                 </CardContent>
               </Card>
 
-              {/* Throughput detail */}
               <Card className="border-border/60 shadow-sm">
                 <CardHeader className="pb-3">
                   <CardTitle className="text-sm">Speed breakdown</CardTitle>
@@ -1271,7 +1233,6 @@ export default function Home() {
                 </CardContent>
               </Card>
 
-              {/* Cost */}
               <Card className="border-border/60 shadow-sm">
                 <CardHeader className="pb-3">
                   <CardTitle className="text-sm flex items-center gap-2">
@@ -1304,7 +1265,6 @@ export default function Home() {
                 </CardContent>
               </Card>
 
-              {/* Batch scaling chart */}
               <Card className="border-border/60 shadow-sm">
                 <CardHeader className="pb-2">
                   <CardTitle className="text-sm">How throughput grows with more users</CardTitle>
@@ -1356,7 +1316,6 @@ export default function Home() {
                 </CardContent>
               </Card>
 
-              {/* GPU comparison chart */}
               <Card className="border-border/60 shadow-sm">
                 <CardHeader className="pb-2">
                   <CardTitle className="text-sm">
@@ -1416,7 +1375,6 @@ export default function Home() {
                 </CardContent>
               </Card>
 
-              {/* ===== Long-Context Capacity Planner ===== */}
               <Card className="border-border/60 shadow-sm">
                 <CardHeader className="pb-2">
                   <CardTitle className="text-sm flex items-center gap-2">
@@ -1428,7 +1386,6 @@ export default function Home() {
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-3">
-                  {/* Topology recommendation callout */}
                   <div className={`flex items-start gap-3 p-3 rounded-md border ${
                     topologyRec.fits
                       ? "border-emerald-500/40 bg-emerald-500/5"
@@ -1448,7 +1405,6 @@ export default function Home() {
                     </div>
                   </div>
 
-                  {/* Context sweep chart — max concurrent users at each context size */}
                   <div className="pt-1">
                     <div className="flex items-center justify-between text-[11px] mb-1.5">
                       <span className="text-muted-foreground">Max concurrent users at each context length</span>
@@ -1492,7 +1448,6 @@ export default function Home() {
                           />
                           <Bar dataKey="maxConcurrent" radius={[3, 3, 0, 0]}>
                             {longContextData.map((d, i) => {
-                              // Highlight current context (closest match by tokens)
                               const totalContext = promptTokens + (cachePrefixTokens ?? 0);
                               const isCurrent = d.contextTokens >= totalContext &&
                                 (i === 0 || longContextData[i - 1].contextTokens < totalContext);
@@ -1515,7 +1470,6 @@ export default function Home() {
                     </div>
                   </div>
 
-                  {/* Detailed metrics table */}
                   <div className="pt-1 overflow-x-auto">
                     <table className="w-full text-[11px]">
                       <thead className="text-[10px] uppercase tracking-wider text-muted-foreground">
@@ -1612,7 +1566,6 @@ export default function Home() {
             </Card>
           </div>
 
-          {/* Confidence legend */}
           <div className="mt-10">
             <ConfidenceLegend />
             <p className="text-[10px] text-muted-foreground mt-2 leading-relaxed max-w-3xl">
@@ -1623,7 +1576,6 @@ export default function Home() {
             </p>
           </div>
 
-          {/* Formula reference */}
           <div className="mt-10">
             <Card className="border-border/60 shadow-sm">
               <CardHeader>
@@ -1792,7 +1744,6 @@ export default function Home() {
             </Card>
           </div>
 
-          {/* Tech badges */}
           <div className="mt-8 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
             <CheckCircle2 className="size-3.5 text-emerald-500" />
             <span>Formulas verified against:</span>
@@ -1805,10 +1756,8 @@ export default function Home() {
         </div>
       </main>
 
-      {/* Footer (sticky) */}
       <footer className="mt-auto border-t border-border/60 py-6">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 space-y-4">
-          {/* Row 1: Branding + Resources (visible pills) */}
           <div className="flex flex-col sm:flex-row items-start justify-between gap-4">
             <div className="flex items-center gap-2 text-xs">
               <span className="font-semibold text-foreground">tokcalc</span>
@@ -1834,7 +1783,6 @@ export default function Home() {
               </a>
             </div>
           </div>
-          {/* Row 2: Tech stack + GitHub/npm/Issues (also pills) */}
           <div className="flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-muted-foreground">
             <div className="flex items-center gap-2">
               <span>built with Next.js 16 · Tailwind · Recharts</span>
@@ -1981,34 +1929,27 @@ function FormulaBox({ children }: { children: React.ReactNode }) {
    BUILD-VS-BUY TAB (independent state)
    ============================================================ */
 function BuildVsBuyTab() {
-  // Self-host config
   const [shModel, setShModel] = useState("llama3-8b");
   const [shGpu, setShGpu] = useState("a100-80");
   const [shQuant, setShQuant] = useState<Quantization>("fp16");
   const [shNumGpus, setShNumGpus] = useState(1);
   const [shGpuPrice, setShGpuPrice] = useState<number | "">("");
-  const [utilization, setUtilization] = useState(50); // %
+  const [utilization, setUtilization] = useState(50);
   const [batchSize, setBatchSize] = useState(8);
 
-  // Workload
   const [inputTokens, setInputTokens] = useState(500);
   const [outputTokens, setOutputTokens] = useState(200);
   const [reqsPerDay, setReqsPerDay] = useState(1000);
 
-  // API config
   const [apiProvider, setApiProvider] = useState<"openai" | "anthropic" | "google" | "groq" | "deepseek" | "mistral" | "together">("openai");
   const [apiModel, setApiModel] = useState("gpt-4o-mini");
-
-  // === URL-share state ===
   const [urlRestored, setUrlRestored] = useState(false);
 
-  // One-time mount: restore state from URL hash (priority: URL > localStorage > defaults)
   useEffect(() => {
     /* eslint-disable react-hooks/set-state-in-effect */
     if (typeof window === "undefined") return;
     const hash = window.location.hash;
     if (!hash || hash === "#") {
-      // No URL hash — try localStorage
       const stored = loadBvbFromStorage();
       if (stored) {
         if (stored.shModel) setShModel(stored.shModel);
@@ -2049,7 +1990,6 @@ function BuildVsBuyTab() {
     /* eslint-enable react-hooks/set-state-in-effect */
   }, []);
 
-  // Continuous: when state changes, update URL hash + localStorage
   useEffect(() => {
     if (!urlRestored) return;
     const state = {
@@ -2069,7 +2009,6 @@ function BuildVsBuyTab() {
   const shModelSpec = MODELS.find((m) => m.id === shModel)!;
   const shQuantSpec = QUANTIZATIONS.find((q) => q.id === shQuant)!;
 
-  // Run calc on self-host
   const sh = useMemo(() => calculate({
     modelId: shModel,
     gpuId: shGpu,
@@ -2081,16 +2020,14 @@ function BuildVsBuyTab() {
     gpuHourlyCost: shGpuPrice === "" ? undefined : Number(shGpuPrice),
   }), [shModel, shGpu, shQuant, shNumGpus, batchSize, inputTokens, outputTokens, shGpuPrice]);
 
-  // Self-host cost per 1M tokens, accounting for utilization
   const effGpuPrice = (shGpuPrice === "" ? (shGpuSpec.usdPerHour ?? 0) : Number(shGpuPrice)) * shNumGpus;
   const effAggregateTokens = sh.aggregateTokensPerSec * (utilization / 100);
   const selfHostCostPerM = effAggregateTokens > 0
     ? (effGpuPrice / 3600 / effAggregateTokens) * 1e6
     : Infinity;
-  const selfHostMonthly = effGpuPrice * 730; // 730 hours/month
+  const selfHostMonthly = effGpuPrice * 730;
   const tokensPerDay = effAggregateTokens * 3600 * (utilization / 100) * 24;
 
-  // API pricing (cited 2025-2026 from research)
   const API_PRICES: Record<string, { in: number; out: number; cached: number | null; status: string }> = {
     "gpt-4o":       { in: 2.50, out: 10.00, cached: 1.25, status: "current" },
     "gpt-4o-mini": { in: 0.15, out: 0.60, cached: 0.075, status: "current" },
@@ -2108,20 +2045,16 @@ function BuildVsBuyTab() {
   };
 
   const apiPricing = API_PRICES[apiModel];
-  // Per-request API cost: input tokens + output tokens (no caching assumed in this basic version)
   const apiCostPerRequest =
     (inputTokens / 1e6) * apiPricing.in + (outputTokens / 1e6) * apiPricing.out;
   const apiCostPerDay = apiCostPerRequest * reqsPerDay;
   const apiMonthlyCost = apiCostPerDay * 30;
-  const apiCostPerMOut = apiPricing.out; // $/M output tokens (at face value)
+  const apiCostPerMOut = apiPricing.out;
 
-  // Break-even: when monthly self-host = monthly API
-  // self_host_monthly = api_monthly → reqs_per_day_break_even = self_host_monthly / (30 * api_cost_per_request)
   const breakEvenReqsPerDay = apiCostPerRequest > 0
     ? selfHostMonthly / (30 * apiCostPerRequest)
     : Infinity;
 
-  // Verdict
   const cheaperThanApi = selfHostCostPerM < apiCostPerMOut;
   const meetsVolume = reqsPerDay > breakEvenReqsPerDay;
 
@@ -2136,7 +2069,6 @@ function BuildVsBuyTab() {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        {/* Self-host side */}
         <Card className="border-border/60 shadow-sm">
           <CardHeader className="pb-3">
             <CardTitle className="text-sm flex items-center gap-2">
@@ -2212,7 +2144,6 @@ function BuildVsBuyTab() {
           </CardContent>
         </Card>
 
-        {/* Workload + API side */}
         <Card className="border-border/60 shadow-sm">
           <CardHeader className="pb-3">
             <CardTitle className="text-sm flex items-center gap-2">
@@ -2240,7 +2171,6 @@ function BuildVsBuyTab() {
               <Label className="text-xs">API provider</Label>
               <Select value={apiProvider} onValueChange={(v) => {
                 setApiProvider(v as typeof apiProvider);
-                // Set default model per provider
                 const defaults: Record<string, string> = {
                   openai: "gpt-4o-mini",
                   anthropic: "claude-3.5-sonnet",
@@ -2284,7 +2214,6 @@ function BuildVsBuyTab() {
         </Card>
       </div>
 
-      {/* Verdict */}
       <Card className={`border-2 shadow-sm ${cheaperThanApi && meetsVolume ? "border-emerald-500" : "border-amber-500/40"}`}>
         <CardHeader>
           <CardTitle className="text-base flex items-center gap-2">
@@ -2337,22 +2266,262 @@ function BuildVsBuyTab() {
 }
 
 /* ============================================================
+   LIVE GPU PRICING CARD (NEW — v0.2.0)
+   Fetches Azure / AWS / GCP / Vast.ai pricing in parallel via Promise.all
+   ============================================================ */
+function LivePricingCard() {
+  const [loading, setLoading] = useState(true);
+  const [refreshKey, setRefreshKey] = useState(0);
+  const [data, setData] = useState<{
+    azure: any | null;
+    aws: any | null;
+    gcp: any | null;
+    vast_ai: any | null;
+  }>({ azure: null, aws: null, gcp: null, vast_ai: null });
+  const [errors, setErrors] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setErrors({});
+
+    const providers = [
+      { key: "azure", url: "/api/pricing/azure" },
+      { key: "aws", url: "/api/pricing/aws" },
+      { key: "gcp", url: "/api/pricing/gcp" },
+      { key: "vast_ai", url: "/api/pricing/vast-ai" },
+    ];
+
+    Promise.allSettled(
+      providers.map(async (p) => {
+        const res = await fetch(p.url);
+        if (!res.ok) {
+          const errBody = await res.json().catch(() => ({}));
+          throw new Error(errBody.error || `${p.key} returned ${res.status}`);
+        }
+        return { key: p.key, data: await res.json() };
+      })
+    ).then((results) => {
+      if (cancelled) return;
+      const newData: any = { azure: null, aws: null, gcp: null, vast_ai: null };
+      const newErrors: Record<string, string> = {};
+      results.forEach((result, i) => {
+        const key = providers[i].key;
+        if (result.status === "fulfilled") {
+          newData[key] = result.value.data;
+        } else {
+          newErrors[key] = result.reason?.message || "Fetch failed";
+        }
+      });
+      setData(newData);
+      setErrors(newErrors);
+      setLoading(false);
+    });
+
+    return () => { cancelled = true; };
+  }, [refreshKey]);
+
+  // Build a per-GPU comparison table: cheapest across providers
+  const gpuComparison = useMemo(() => {
+    const map = new Map<string, { gpu: string; cheapest: number; cheapestProvider: string; perProvider: Record<string, { price: number; region: string; sku?: string }> }>();
+
+    const ingest = (provider: string, entries: any[], priceField: string, gpuField: string, regionField: string, skuField?: string) => {
+      for (const e of entries) {
+        const gpu = e[gpuField];
+        const price = e[priceField];
+        const region = e[regionField] || "—";
+        const sku = skuField ? e[skuField] : undefined;
+        if (!gpu || !price || price <= 0) continue;
+        const normalized = gpu.replace(/\s*\(.*\)/, "").trim();
+        if (!map.has(normalized)) {
+          map.set(normalized, { gpu: normalized, cheapest: Infinity, cheapestProvider: "", perProvider: {} });
+        }
+        const entry = map.get(normalized)!;
+        if (!entry.perProvider[provider] || entry.perProvider[provider].price > price) {
+          entry.perProvider[provider] = { price, region, sku };
+          if (price < entry.cheapest) {
+            entry.cheapest = price;
+            entry.cheapestProvider = provider;
+          }
+        }
+      }
+    };
+
+    if (data.azure?.prices) ingest("azure", data.azure.prices, "price", "gpu", "region", "sku");
+    if (data.aws?.prices) ingest("aws", data.aws.prices, "pricePerGpuHour", "gpu", "region", "instanceType");
+    if (data.gcp?.prices) ingest("gcp", data.gcp.prices, "pricePerGpuHour", "gpu", "region", "instanceType");
+    if (data.vast_ai?.offers) ingest("vast_ai", data.vast_ai.offers, "pricePerGpuHour", "gpu", "region");
+
+    return Array.from(map.values()).sort((a, b) => a.cheapest - b.cheapest);
+  }, [data]);
+
+  const PROVIDER_META: Record<string, { label: string; color: string; note: string }> = {
+    azure: { label: "Azure", color: "text-blue-500", note: "Azure Retail Prices API (public, unauthenticated)" },
+    aws: { label: "AWS", color: "text-orange-500", note: "AWS EC2 bulk pricing (no IAM creds)" },
+    gcp: { label: "GCP", color: "text-red-500", note: "GCP Cloud Billing Catalog (requires GCP_API_KEY)" },
+    vast_ai: { label: "Vast.ai", color: "text-purple-500", note: "Vast.ai marketplace — spot prices" },
+  };
+
+  const ageLabel = (iso: string) => {
+    if (!iso) return "—";
+    const ms = Date.now() - new Date(iso).getTime();
+    if (ms < 60000) return "just now";
+    if (ms < 3600000) return `${Math.floor(ms / 60000)}m ago`;
+    if (ms < 86400000) return `${Math.floor(ms / 3600000)}h ago`;
+    return `${Math.floor(ms / 86400000)}d ago`;
+  };
+
+  return (
+    <Card className="border-emerald-500/30 shadow-sm">
+      <CardHeader>
+        <div className="flex items-center justify-between gap-2 flex-wrap">
+          <div>
+            <CardTitle className="text-base flex items-center gap-2">
+              <Gauge className="size-4 text-emerald-500" />
+              Live GPU price comparison — all providers
+            </CardTitle>
+            <CardDescription className="text-xs mt-1">
+              Cheapest available GPU price across Azure, AWS, GCP, and Vast.ai marketplace. Fetched in parallel every load.
+            </CardDescription>
+          </div>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => setRefreshKey(k => k + 1)}
+            disabled={loading}
+            className="text-xs gap-1.5"
+          >
+            {loading ? "Refreshing…" : "Refresh"}
+          </Button>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {/* LIVE badges per provider */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+          {Object.entries(PROVIDER_META).map(([key, meta]) => {
+            const d = data[key as keyof typeof data];
+            const err = errors[key];
+            const isLive = d && !err;
+            return (
+              <div key={key} className={`p-2.5 rounded-md border ${
+                isLive ? "border-emerald-500/40 bg-emerald-500/5"
+                : err ? "border-amber-500/40 bg-amber-500/5"
+                : "border-border/60 bg-muted/30"
+              }`}>
+                <div className="flex items-center gap-1.5 mb-1">
+                  <span className={`size-1.5 rounded-full ${isLive ? "bg-emerald-500 animate-pulse" : err ? "bg-amber-500" : "bg-muted-foreground/40"}`} />
+                  <span className="text-xs font-semibold">{meta.label}</span>
+                  {isLive && <Badge className="text-[9px] bg-emerald-500/10 text-emerald-600 border-emerald-500/30">LIVE</Badge>}
+                </div>
+                {loading && !d ? (
+                  <div className="text-[10px] text-muted-foreground">Fetching…</div>
+                ) : isLive ? (
+                  <>
+                    <div className="text-[10px] text-muted-foreground">{meta.note}</div>
+                    <div className="text-[10px] font-mono text-muted-foreground/70 mt-0.5">
+                      {ageLabel(d.retrievedAt)} · {d.cached ? "cached" : "fresh"}
+                    </div>
+                  </>
+                ) : err ? (
+                  <div className="text-[10px] text-amber-600 dark:text-amber-400 leading-relaxed">
+                    {err.length > 80 ? err.slice(0, 80) + "…" : err}
+                  </div>
+                ) : (
+                  <div className="text-[10px] text-muted-foreground">—</div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Comparison table */}
+        {loading && gpuComparison.length === 0 ? (
+          <div className="text-center text-xs text-muted-foreground py-6">
+            Fetching live prices from 4 providers…
+          </div>
+        ) : gpuComparison.length === 0 ? (
+          <div className="text-center text-xs text-muted-foreground py-6">
+            No live prices available. All providers failed or returned no data.
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead className="bg-muted/40 text-[10px] uppercase">
+                <tr>
+                  <th className="text-left px-3 py-2">GPU</th>
+                  <th className="text-right px-3 py-2">Cheapest</th>
+                  <th className="text-left px-3 py-2">Provider</th>
+                  <th className="text-right px-3 py-2 text-blue-500">Azure</th>
+                  <th className="text-right px-3 py-2 text-orange-500">AWS</th>
+                  <th className="text-right px-3 py-2 text-red-500">GCP</th>
+                  <th className="text-right px-3 py-2 text-purple-500">Vast.ai</th>
+                </tr>
+              </thead>
+              <tbody>
+                {gpuComparison.map((row) => (
+                  <tr key={row.gpu} className="border-t border-border/40 hover:bg-muted/20">
+                    <td className="px-3 py-1.5 font-medium">{row.gpu}</td>
+                    <td className="px-3 py-1.5 text-right font-mono font-semibold text-emerald-500">
+                      ${row.cheapest.toFixed(2)}/hr
+                    </td>
+                    <td className="px-3 py-1.5 text-muted-foreground">
+                      {PROVIDER_META[row.cheapestProvider]?.label || "—"}
+                    </td>
+                    {(["azure", "aws", "gcp", "vast_ai"] as const).map(p => {
+                      const pp = row.perProvider[p];
+                      return (
+                        <td key={p} className="px-3 py-1.5 text-right font-mono">
+                          {pp ? (
+                            <span className={row.cheapestProvider === p ? "text-emerald-500 font-semibold" : ""}>
+                              ${pp.price.toFixed(2)}
+                            </span>
+                          ) : (
+                            <span className="text-muted-foreground/40">—</span>
+                          )}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {/* Notes */}
+        <div className="text-[10px] text-muted-foreground leading-relaxed space-y-1 pt-2 border-t border-border/40">
+          <p>
+            <strong className="text-foreground">Cheapest column</strong> = lowest per-GPU hourly price across all providers.
+            <strong className="text-foreground"> Green cell</strong> = which provider offered that price.
+          </p>
+          <p>
+            Azure = on-demand consumption pricing (24h cache).
+            AWS = on-demand Linux, us-east-1 (24h cache).
+            GCP = on-demand Compute Engine (requires <code>GCP_API_KEY</code> env var; 24h cache).
+            Vast.ai = spot marketplace (5m cache — prices change rapidly; individual offers may be gone by the time you try to rent).
+          </p>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+/* ============================================================
    REFERENCE TAB — catalog + pricing tables
    ============================================================ */
 function ReferenceTab() {
-  const [subview, setSubview] = useState<"models" | "gpus" | "quants" | "api" | "cloud">("models");
+  const [subview, setSubview] = useState<"models" | "gpus" | "quants" | "api" | "cloud" | "live">("models");
 
   return (
     <div className="space-y-4">
       <div className="mb-2 max-w-3xl">
         <h2 className="text-xl font-semibold tracking-tight mb-1">Reference catalog</h2>
         <p className="text-sm text-muted-foreground leading-relaxed">
-          All models, GPUs, quantizations, and live API/cloud pricing used by tokcalc.
+          All models, GPUs, quantizations, live API pricing, and live cloud GPU pricing used by tokcalc.
           Every record has a source link where available.
         </p>
       </div>
 
-      {/* Sub-tabs */}
       <div className="border-b border-border/60">
         <div className="flex gap-1 -mb-px overflow-x-auto">
           {([
@@ -2361,6 +2530,7 @@ function ReferenceTab() {
             { id: "quants", label: "Quantization" },
             { id: "api", label: "API pricing" },
             { id: "cloud", label: "Cloud GPU pricing" },
+            { id: "live", label: "🔴 Live pricing" },
           ] as const).map(t => (
             <button
               key={t.id}
@@ -2556,7 +2726,7 @@ function ReferenceTab() {
           <CardHeader>
             <CardTitle className="text-sm">Cloud GPU pricing ($/hr, 2026 estimates)</CardTitle>
             <CardDescription className="text-xs">
-              Approximate on-demand rates from research brief. Prices vary by region, commitment, and availability.
+              Approximate on-demand rates from research brief. For live pricing, see the <button onClick={() => setSubview("live")} className="text-emerald-500 hover:underline">🔴 Live pricing</button> tab.
             </CardDescription>
           </CardHeader>
           <CardContent className="p-0">
@@ -2590,6 +2760,10 @@ function ReferenceTab() {
             </div>
           </CardContent>
         </Card>
+      )}
+
+      {subview === "live" && (
+        <LivePricingCard />
       )}
     </div>
   );
