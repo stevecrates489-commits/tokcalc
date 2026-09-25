@@ -47,10 +47,10 @@ import {
   recommendTopology,
   fmtContext,
   type Quantization,
-} from "../../src/lib/token-calc.js";
+} from "../../src/lib/token-calc";
 
 // Import MLPerf curated reference configs (shared with the web app)
-import { MLPERF_CURATED } from "../../src/lib/mlperf-curated.js";
+import { MLPERF_CURATED } from "../../src/lib/mlperf-curated";
 
 // Helper function to format Zod schema for MCP protocol compliance (Strips $schema meta-tag & resolves refs)
 function formatInputSchema(schema: z.ZodTypeAny) {
@@ -380,7 +380,10 @@ function handleListGpus(input: z.infer<typeof ListGpusSchema>) {
   let filtered = GPUS;
   if (input.vendor) filtered = filtered.filter(g => g.vendor === input.vendor);
   if (input.category) filtered = filtered.filter(g => g.category === input.category);
-  if (input.minVramGb !== undefined) filtered = filtered.filter(g => g.vramGb >= input.minVramGb);
+  if (input.minVramGb !== undefined) {
+    const minVram = input.minVramGb;
+    filtered = filtered.filter(g => g.vramGb >= minVram);
+  }
 
   return {
     count: filtered.length,

@@ -53,7 +53,7 @@
 
 import { NextRequest } from "next/server";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
-import { createMcpServer } from "@tokcalc/mcp-server/server.js";
+import { createMcpServer } from "../../../../mini-services/mcp-server/server";
 import { Ratelimit } from "@upstash/ratelimit";
 import { Redis } from "@upstash/redis";
 import crypto from "node:crypto";

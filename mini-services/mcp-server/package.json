@@ -1,8 +1,11 @@
 {
   "name": "@tokcalc/mcp-server",
   "version": "0.2.0",
+  "mcpName": "io.github.stevecrates489-commits/tokcalc",
   "description": "tokcalc MCP server — open-source LLM serving capacity planner for AI agents. v0.2.0: stdio + stateless HTTP transport with bearer API key auth + KV-backed rate limiting + public hosted endpoint. 7 read-only tools: estimate_capacity, compare_gpus, recommend_topology, estimate_api_vs_self_host, list_models, list_gpus, get_mlperf_benchmarks.",
   "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "license": "Apache-2.0",
   "bin": {
     "tokcalc-mcp": "./dist/index.js",
@@ -35,9 +38,18 @@
     "node": ">=18"
   },
   "exports": {
-    ".": "./dist/server.js",
-    "./server": "./dist/server.js",
-    "./server.js": "./dist/server.js",
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./server": {
+      "types": "./dist/server.d.ts",
+      "import": "./dist/server.js"
+    },
+    "./server.js": {
+      "types": "./dist/server.d.ts",
+      "import": "./dist/server.js"
+    },
     "./package.json": "./package.json"
   },
   "dependencies": {

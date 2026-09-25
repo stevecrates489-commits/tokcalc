@@ -108,7 +108,12 @@ const CATEGORY_LABEL: Record<GpuCategory, string> = {
   datacenter: "Datacenter",
   workstation: "Workstation",
   consumer: "Consumer",
-  mac: "Mac unified",
+  mac: "Mac / Apple Silicon",
+  legacy: "Legacy / Previous Gen",
+  lpu: "LPU (Groq)",
+  rdu: "RDU (SambaNova)",
+  tpu: "TPU (Google)",
+  wse: "WSE (Cerebras)"
 };
 
 /* ---------- PLAIN-ENGLISH GLOSSARY ---------- */
@@ -1627,7 +1632,7 @@ export default function Home() {
                         multiply + one add per parameter).
                       </p>
                       <p className="text-muted-foreground">
-                        Your numbers: <code>{selectedGpu.flopsTflops * numGpus}</code> TFLOPS × 0.5 ={" "}
+                        Your numbers: <code>{(selectedGpu.flopsTflops ?? 0) * numGpus}</code> TFLOPS × 0.5 ={" "}
                         <strong className="text-foreground">{(result.effectiveFlopsTflops).toFixed(0)} TF effective</strong>,
                         divided by 2 × {selectedModel.activeParamsB}B params ={" "}
                         <strong className="text-emerald-500">{fmtTokens(result.prefillTokensPerSec)} tok/s</strong>.
