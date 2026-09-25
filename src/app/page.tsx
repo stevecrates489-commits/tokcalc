@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import {
   Calculator,
   Gauge,
@@ -17,17 +18,11 @@ import {
   Info,
   BookOpen,
   HelpCircle,
-  FileText,
 } from "lucide-react";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { ConfidenceDot, ConfidenceBadge, ConfidenceLegend } from "@/components/confidence-badge";
-import { BenchmarkImport } from "@/components/benchmark-import";
-import { AzureLivePricing } from "@/components/azure-live-pricing";
-import { VastAiLivePricing } from "@/components/vast-ai-live-pricing";
-import { LivePricingComparison } from "@/components/live-pricing-comparison";
 import type { Confidence } from "@/lib/token-calc";
 import { track } from "@/lib/track";
-import { ENGINE_PRESETS, getEngine, getSupportedQuants, type EngineId } from "@/lib/engine-presets";
 import {
   Bar,
   BarChart,
@@ -106,7 +101,8 @@ import {
   type CalcTabState,
 } from "@/lib/url-state";
 import { useToast } from "@/hooks/use-toast";
-import { Share2, Check } from "lucide-react";
+import { Share2, Check, Clipboard, FileText, Sparkles } from "lucide-react";
+import { BenchmarkImport } from "@/components/benchmark-import";
 
 const CATEGORY_LABEL: Record<GpuCategory, string> = {
   datacenter: "Datacenter",
@@ -180,29 +176,13 @@ export default function Home() {
   const [cacheHitRate, setCacheHitRate] = useState(0);
   const [cacheTTL, setCacheTTL] = useState<CacheTTL>("5m");
   const [cacheProvider, setCacheProvider] = useState<"self-hosted" | "anthropic" | "openai">("self-hosted");
-  // === Engine selection ===
-  const [engineId, setEngineId] = useState<EngineId>("generic");
-  const selectedEngine = getEngine(engineId);
-
-  // Auto-switch quantization if current one isn't supported by the selected engine
-  useEffect(() => {
-    if (engineId === "generic") return; // Generic supports everything
-    const supported = getSupportedQuants(engineId);
-    if (!supported.includes(quantization)) {
-      // Switch to FP16 (supported by all engines) or first available
-      if (supported.includes("fp16")) {
-        setQuantization("fp16");
-      } else {
-        setQuantization(supported[0]);
-      }
-    }
-  }, [engineId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // === URL-share state (Phase A) ===
   // Track whether we've restored state from URL — prevents the write effect
   // from clobbering the URL on first mount before we've read it.
   const [urlRestored, setUrlRestored] = useState(false);
   const [shareCopied, setShareCopied] = useState(false);
+  const [markdownCopied, setMarkdownCopied] = useState(false);
   const { toast } = useToast();
 
   // ---- One-time mount: read URL hash and restore state ----
@@ -236,7 +216,6 @@ export default function Home() {
         if (typeof stored.cacheHitRate === "number") setCacheHitRate(stored.cacheHitRate);
         if (stored.cacheTTL) setCacheTTL(stored.cacheTTL as CacheTTL);
         if (stored.cacheProvider) setCacheProvider(stored.cacheProvider as "self-hosted" | "anthropic" | "openai");
-        if (stored.engineId) setEngineId(stored.engineId as EngineId);
       }
       setUrlRestored(true);
       return;
@@ -266,7 +245,6 @@ export default function Home() {
       if (typeof c.cacheHitRate === "number") setCacheHitRate(c.cacheHitRate);
       if (c.cacheTTL) setCacheTTL(c.cacheTTL as CacheTTL);
       if (c.cacheProvider) setCacheProvider(c.cacheProvider as "self-hosted" | "anthropic" | "openai");
-      if (c.engineId) setEngineId(c.engineId as EngineId);
     }
     setUrlRestored(true);
     /* eslint-enable react-hooks/set-state-in-effect */
@@ -281,7 +259,6 @@ export default function Home() {
       useSpeculative, speculativeBoost,
       useContinuousBatching, continuousBatchingMultiplier,
       reasoningTokens, cachePrefixTokens, cacheHitRate, cacheTTL, cacheProvider,
-      engineId,
     };
     if (activeTab === "calculator") {
       writeUrlHash(serializeCalcState(state));
@@ -293,8 +270,8 @@ export default function Home() {
     gpuHourlyCost, useSpeculative, speculativeBoost, useContinuousBatching,
     continuousBatchingMultiplier, reasoningTokens, cachePrefixTokens, cacheHitRate,
     cacheTTL, cacheProvider,
-    engineId,
   ]);
+
   // ---- Share button handler ----
   const handleShare = async () => {
     // Track: high-signal event — user found something worth sharing
@@ -308,7 +285,6 @@ export default function Home() {
         useSpeculative, speculativeBoost,
         useContinuousBatching, continuousBatchingMultiplier,
         reasoningTokens, cachePrefixTokens, cacheHitRate, cacheTTL, cacheProvider,
-        engineId,
       };
       writeUrlHash(serializeCalcState(state));
     }
@@ -345,64 +321,50 @@ export default function Home() {
     }
   };
 
-  // ---- Copy as Markdown handler ----
+  // Copy the current calculation result as a Markdown snippet
+  // (useful for pasting into GitHub issues, Slack, docs).
   const handleCopyMarkdown = async () => {
-    track("copied_markdown", { tab: activeTab });
-    const md = generateMarkdown();
+    const model = selectedModel;
+    const gpu = GPUS.find((g) => g.id === gpuId);
+    const md = [
+      `# tokcalc: ${model?.name ?? modelId} on ${gpu?.name ?? gpuId} (${quantization}) ×${numGpus}`,
+      ``,
+      `## Performance`,
+      `- **Decode throughput:** ${fmtTokens(result.decodeTokensPerSec)} tok/s`,
+      `- **Aggregate (batched):** ${fmtTokens(result.aggregateTokensPerSec)} tok/s`,
+      `- **TTFT:** ${fmtMs(result.ttftMs)}`,
+      `- **ITL:** ${fmtMs(result.itlMs)}`,
+      `- **Total latency:** ${fmtMs(result.totalLatencyMs)} (${outputTokens}-tok answer)`,
+      ``,
+      `## Memory`,
+      `- **Model weights:** ${result.modelSizeGb.toFixed(2)} GB`,
+      `- **KV cache:** ${result.kvCacheTotalGb.toFixed(2)} GB`,
+      `- **Total VRAM:** ${result.totalVramNeededGb.toFixed(2)} GB / ${(gpu?.vramGb ?? 0) * numGpus} GB ${result.vramFits ? "" : " (⚠️ over budget)"}`,
+      ``,
+      `## Cost`,
+      `- **GPU hourly:** $${result.costPerHour.toFixed(2)}/hr`,
+      `- **Cost per M output:** $${result.costPerMillionOutputTokens.toFixed(2)}`,
+      `- **Cost per request:** $${result.costPerRequest.toFixed(4)}`,
+      ``,
+      `## Config`,
+      `- Engine: generic (continuous batching ${useContinuousBatching ? `${continuousBatchingMultiplier}× on` : "off"})`,
+      `- Batch size: ${batchSize}`,
+      `- Prompt: ${promptTokens} tokens, Output: ${outputTokens} tokens`,
+      result.longContextWarning ? `- ⚠️ ${result.longContextWarning}` : ``,
+      ``,
+      `*Generated by [tokcalc](https://tokcalc.vercel.app/) — open-source LLM capacity planner*`,
+    ].filter(Boolean).join("\n");
+
     try {
       await navigator.clipboard.writeText(md);
-      toast({ title: "Markdown copied", description: "Paste into GitHub issues, Slack, Notion, or blog posts." });
+      setMarkdownCopied(true);
+      track("copied_markdown", { model: modelId, gpu: gpuId });
+      toast({ title: "Markdown copied", description: "Paste into GitHub issues, docs, or Slack." });
+      setTimeout(() => setMarkdownCopied(false), 2000);
     } catch {
-      try {
-        const el = document.createElement("textarea");
-        el.value = md;
-        document.body.appendChild(el);
-        el.select();
-        document.execCommand("copy");
-        document.body.removeChild(el);
-        toast({ title: "Markdown copied", description: "Paste into GitHub issues, Slack, Notion, or blog posts." });
-      } catch {
-        toast({ title: "Couldn't copy", description: "Copy manually from the address bar." });
-      }
+      toast({ title: "Couldn't copy markdown", description: "Try selecting manually." });
     }
   };
-
-  // Generate markdown table of current results
-  function generateMarkdown(): string {
-    const lines: string[] = [];
-    lines.push(`## tokcalc — ${selectedModel.name} on ${selectedGpu.name}`);
-    lines.push("");
-    lines.push(`| Metric | Value |`);
-    lines.push(`|---|---|`);
-    lines.push(`| **Model** | ${selectedModel.name} (${selectedModel.paramsB}B params, ${selectedModel.activeParamsB}B active) |`);
-    lines.push(`| **GPU** | ${numGpus}× ${selectedGpu.name} (${selectedGpu.vramGb * numGpus} GB total) |`);
-    lines.push(`| **Quantization** | ${selectedQuant.label} (${selectedQuant.bytesPerParam * 8}-bit) |`);
-    lines.push(`| **Engine** | ${selectedEngine.name} |`);
-    lines.push(`| **Context** | ${promptTokens + (cachePrefixTokens ?? 0)} tokens |`);
-    lines.push(`| **Batch size** | ${batchSize} |`);
-    if (useContinuousBatching) {
-      lines.push(`| **Continuous batching** | ${continuousBatchingMultiplier.toFixed(1)}× multiplier |`);
-    }
-    if (reasoningTokens > 0) {
-      lines.push(`| **Reasoning tokens** | ${reasoningTokens} (hidden) |`);
-    }
-    lines.push(`| **Generation speed** | ${fmtTokens(result.decodeTokensPerSec)} tok/s (1 user) |`);
-    lines.push(`| **Total throughput** | ${fmtTokens(result.aggregateTokensPerSec)} tok/s (${batchSize} users) |`);
-    lines.push(`| **TTFT** | ${fmtMs(result.ttftMs)} |`);
-    lines.push(`| **ITL** | ${fmtMs(result.itlMs)} per token |`);
-    lines.push(`| **Total latency** | ${fmtMs(result.totalLatencyMs)} |`);
-    lines.push(`| **Model size** | ${fmtBytes(result.modelSizeGb)} |`);
-    lines.push(`| **KV cache** | ${fmtBytes(result.kvCacheTotalGb)} |`);
-    lines.push(`| **VRAM used** | ${((result.totalVramNeededGb / (selectedGpu.vramGb * numGpus)) * 100).toFixed(1)}% (${fmtBytes(result.totalVramNeededGb)} / ${selectedGpu.vramGb * numGpus} GB) |`);
-    lines.push(`| **Topology** | ${topologyRec.topology} |`);
-    lines.push(`| **GPU cost** | ${fmtMoney(result.costPerHour)}/hr |`);
-    lines.push(`| **Cost per 1M tokens** | ${fmtMoney(result.costPerMillionOutputTokens)} |`);
-    lines.push(`| **Cost per request** | ${fmtMoney(result.costPerRequest)} |`);
-    lines.push("");
-    lines.push(`> Generated by [tokcalc](https://tokcalc.vercel.app) — open-source LLM serving capacity planner.`);
-    lines.push(`> [Try this configuration](${typeof window !== "undefined" ? window.location.href : "https://tokcalc.vercel.app"})`);
-    return lines.join("\n");
-  }
 
   const input: CalcInput = {
     modelId,
@@ -422,9 +384,6 @@ export default function Home() {
     cacheHitRate,
     cacheTTL,
     cacheProvider,
-    engineId,
-    effMem: selectedEngine.etaMem,
-    effCompute: selectedEngine.etaCompute,
   };
 
   const result = useMemo(() => calculate(input), [
@@ -432,7 +391,6 @@ export default function Home() {
     outputTokens, gpuHourlyCost, useSpeculative, speculativeBoost,
     useContinuousBatching, continuousBatchingMultiplier, reasoningTokens,
     cachePrefixTokens, cacheHitRate, cacheTTL, cacheProvider,
-    engineId, selectedEngine.etaMem, selectedEngine.etaCompute,
   ]);
 
   // Chart data — vary batch size from 1 to 32
@@ -561,10 +519,19 @@ export default function Home() {
               size="sm"
               onClick={handleCopyMarkdown}
               className="gap-1.5 h-8"
-              aria-label="Copy results as Markdown"
+              aria-label="Copy result as Markdown"
             >
-              <FileText className="size-3.5" />
-              <span className="text-xs hidden sm:inline">Markdown</span>
+              {markdownCopied ? (
+                <>
+                  <Check className="size-3.5 text-emerald-500" />
+                  <span className="text-xs">Copied</span>
+                </>
+              ) : (
+                <>
+                  <FileText className="size-3.5" />
+                  <span className="text-xs hidden sm:inline">Markdown</span>
+                </>
+              )}
             </Button>
             <ThemeToggle />
           </div>
@@ -576,17 +543,25 @@ export default function Home() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 py-8 sm:py-12">
           {/* Hero */}
           <div className="mb-8 sm:mb-10 max-w-4xl">
-            <h2 className="text-3xl sm:text-4xl font-bold tracking-tight leading-tight">
-              Plan your LLM deployment
-              <br />
-              <span className="text-emerald-500">before you rent the GPUs.</span>
-            </h2>
+            <div className="flex flex-wrap items-center gap-2 mb-3">
+              <h2 className="text-3xl sm:text-4xl font-bold tracking-tight leading-tight">
+                Plan your LLM deployment
+                <br />
+                <span className="text-emerald-500">before you rent the GPUs.</span>
+              </h2>
+            </div>
             <p className="mt-3 text-muted-foreground text-sm sm:text-base leading-relaxed">
               An open-source LLM serving capacity planner. Estimate model fit, KV-cache,
               prefill/decode throughput, continuous batching, latency, multi-GPU scaling,
               cloud cost, API cost, and self-hosting break-even — with transparent formulas
               and cited benchmarks.
             </p>
+            <div className="mt-4 flex flex-wrap items-center gap-2">
+              <Link href="/mcp" className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-full bg-emerald-500/10 text-emerald-600 border border-emerald-500/30 hover:bg-emerald-500/20 hover:border-emerald-500/50 transition-colors">
+                <Sparkles className="size-3.5" />
+                New: MCP server for Cursor + Claude Desktop
+              </Link>
+            </div>
             <div className="mt-4 flex items-start gap-2 text-xs text-muted-foreground bg-muted/30 border border-border/60 rounded-md p-3">
               <HelpCircle className="size-3.5 shrink-0 mt-0.5 text-emerald-500" />
               <div className="leading-relaxed">
@@ -778,62 +753,6 @@ export default function Home() {
                       className="w-full"
                     />
                   </div>
-
-                  {/* Engine selection */}
-                  <div className="pt-2">
-                    <Label className="text-xs">Inference engine</Label>
-                    <Select
-                      value={engineId}
-                      onValueChange={(v) => {
-                        setEngineId(v as EngineId);
-                        track("selected_engine", { engine: v });
-                        // Auto-enable continuous batching if engine has it on by default
-                        const engine = getEngine(v as EngineId);
-                        if (engine.batchingOnByDefault && !useContinuousBatching) {
-                          setUseContinuousBatching(true);
-                          setContinuousBatchingMultiplier(engine.defaultBatchingMultiplier);
-                        }
-                        if (!engine.batchingOnByDefault && useContinuousBatching && v !== "generic") {
-                          setUseContinuousBatching(false);
-                        }
-                      }}
-                    >
-                      <SelectTrigger className="w-full mt-1">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {ENGINE_PRESETS.map((e) => (
-                          <SelectItem key={e.id} value={e.id}>
-                            <span className="flex items-center gap-2">
-                              <span className="font-medium">{e.name}</span>
-                              <span className="text-[10px] text-muted-foreground">
-                                η_mem={e.etaMem} · η_comp={e.etaCompute}
-                              </span>
-                            </span>
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    {engineId !== "generic" && (
-                      <p className="text-[10px] text-muted-foreground mt-1.5 leading-relaxed">
-                        {selectedEngine.notes}
-                      </p>
-                    )}
-                    {engineId !== "generic" && selectedEngine.features.length > 0 && (
-                      <div className="flex flex-wrap gap-1 mt-1.5">
-                        {selectedEngine.features.slice(0, 4).map((f, i) => (
-                          <Badge key={i} variant="outline" className="text-[9px] px-1 py-0 h-3.5">
-                            {f}
-                          </Badge>
-                        ))}
-                        {selectedEngine.features.length > 4 && (
-                          <Badge variant="outline" className="text-[9px] px-1 py-0 h-3.5">
-                            +{selectedEngine.features.length - 4} more
-                          </Badge>
-                        )}
-                      </div>
-                    )}
-                  </div>
                 </CardContent>
               </Card>
 
@@ -849,41 +768,24 @@ export default function Home() {
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-3">
-                  {/* Filter quantizations based on selected engine */}
-                  {(() => {
-                    const supportedQuants = getSupportedQuants(engineId);
-                    const filtered = QUANTIZATIONS.filter(q => supportedQuants.includes(q.id));
-                    const hiddenCount = QUANTIZATIONS.length - filtered.length;
-                    return (
-                      <>
-                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
-                          {filtered.map((q) => (
-                            <button
-                              key={q.id}
-                              onClick={() => setQuantization(q.id)}
-                              className={`text-xs px-2 py-1.5 rounded-md border transition-colors text-left ${
-                                quantization === q.id
-                                  ? "border-emerald-500 bg-emerald-500/10 text-foreground"
-                                  : "border-border hover:border-border/80 hover:bg-muted"
-                              }`}
-                            >
-                              <div className="font-medium">{q.label}</div>
-                              <div className="text-[10px] text-muted-foreground mt-0.5">
-                                {q.bytesPerParam * 8}-bit
-                              </div>
-                            </button>
-                          ))}
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
+                    {QUANTIZATIONS.map((q) => (
+                      <button
+                        key={q.id}
+                        onClick={() => setQuantization(q.id)}
+                        className={`text-xs px-2 py-1.5 rounded-md border transition-colors text-left ${
+                          quantization === q.id
+                            ? "border-emerald-500 bg-emerald-500/10 text-foreground"
+                            : "border-border hover:border-border/80 hover:bg-muted"
+                        }`}
+                      >
+                        <div className="font-medium">{q.label}</div>
+                        <div className="text-[10px] text-muted-foreground mt-0.5">
+                          {q.bytesPerParam * 8}-bit
                         </div>
-                        {engineId !== "generic" && hiddenCount > 0 && (
-                          <p className="text-[10px] text-muted-foreground flex items-center gap-1">
-                            <Info className="size-3 text-amber-500" />
-                            {hiddenCount} format{hiddenCount > 1 ? "s" : ""} hidden — not supported by {selectedEngine.name}.
-                            {" "}Select <button onClick={() => setEngineId("generic")} className="text-emerald-500 hover:underline">Generic</button> to see all.
-                          </p>
-                        )}
-                      </>
-                    );
-                  })()}
+                      </button>
+                    ))}
+                  </div>
                   <p className="text-[11px] text-muted-foreground leading-relaxed">
                     {selectedQuant.description}
                   </p>
@@ -1657,14 +1559,16 @@ export default function Home() {
                   </div>
                 </CardContent>
               </Card>
-
-              {/* ===== Benchmark Import — calibrate the formula against real data ===== */}
-              <BenchmarkImport
-                estimate={result}
-                modelName={selectedModel.name}
-                gpuName={selectedGpu.name}
-              />
             </div>
+          </div>
+
+          {/* Observed benchmark — calibrate against real-world data */}
+          <div className="mt-6">
+            <BenchmarkImport
+              estimate={result}
+              modelName={selectedModel?.name ?? modelId}
+              gpuName={GPUS.find((g) => g.id === gpuId)?.name ?? gpuId}
+            />
           </div>
             </>
           )}
@@ -1903,16 +1807,51 @@ export default function Home() {
 
       {/* Footer (sticky) */}
       <footer className="mt-auto border-t border-border/60 py-6">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-muted-foreground">
-          <div className="flex items-center gap-2">
-            <span className="font-medium">tokcalc</span>
-            <span>·</span>
-            <span>open-source LLM throughput estimator</span>
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 space-y-4">
+          {/* Row 1: Branding + Resources (visible pills) */}
+          <div className="flex flex-col sm:flex-row items-start justify-between gap-4">
+            <div className="flex items-center gap-2 text-xs">
+              <span className="font-semibold text-foreground">tokcalc</span>
+              <span className="text-muted-foreground/50">·</span>
+              <span className="text-muted-foreground">open-source LLM capacity planner</span>
+            </div>
+            <div className="flex flex-wrap items-center gap-1.5">
+              <Link href="/mcp" className="inline-flex items-center gap-1 text-xs font-medium px-2.5 py-1.5 rounded-md border border-emerald-500/40 bg-emerald-500/10 text-emerald-600 hover:bg-emerald-500/20 hover:border-emerald-500/60 transition-colors">
+                <Sparkles className="size-3" />
+                MCP server
+              </Link>
+              <Link href="/compare/h100-vs-h200" className="inline-flex items-center text-xs px-2.5 py-1.5 rounded-md border border-border/60 text-muted-foreground hover:text-foreground hover:border-emerald-500/40 hover:bg-muted/60 transition-colors">
+                H100 vs H200
+              </Link>
+              <Link href="/compare/gguf-q4-k-m-vs-q5-k-m" className="inline-flex items-center text-xs px-2.5 py-1.5 rounded-md border border-border/60 text-muted-foreground hover:text-foreground hover:border-emerald-500/40 hover:bg-muted/60 transition-colors">
+                GGUF Q4_K_M vs Q5_K_M
+              </Link>
+              <Link href="/self-host-vs-openai-api" className="inline-flex items-center text-xs px-2.5 py-1.5 rounded-md border border-border/60 text-muted-foreground hover:text-foreground hover:border-emerald-500/40 hover:bg-muted/60 transition-colors">
+                Self-host vs API
+              </Link>
+              <a href="/sitemap.xml" className="inline-flex items-center text-xs px-2.5 py-1.5 rounded-md border border-border/60 text-muted-foreground hover:text-foreground hover:border-emerald-500/40 hover:bg-muted/60 transition-colors">
+                Sitemap
+              </a>
+            </div>
           </div>
-          <div className="flex items-center gap-3">
-            <span>built with Next.js 16 · Tailwind · Recharts</span>
-            <span>·</span>
-            <span>not affiliated with any GPU vendor</span>
+          {/* Row 2: Tech stack + GitHub/npm/Issues (also pills) */}
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-muted-foreground">
+            <div className="flex items-center gap-2">
+              <span>built with Next.js 16 · Tailwind · Recharts</span>
+              <span className="text-muted-foreground/50">·</span>
+              <span>not affiliated with any GPU vendor</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <a href="https://github.com/stevecrates489-commits/tokcalc" target="_blank" rel="noopener noreferrer" className="inline-flex items-center text-xs px-2.5 py-1.5 rounded-md border border-border/60 hover:border-emerald-500/40 hover:bg-muted/60 hover:text-foreground transition-colors">
+                GitHub ↗
+              </a>
+              <a href="https://www.npmjs.com/package/@tokcalc/mcp-server" target="_blank" rel="noopener noreferrer" className="inline-flex items-center text-xs px-2.5 py-1.5 rounded-md border border-border/60 hover:border-emerald-500/40 hover:bg-muted/60 hover:text-foreground transition-colors">
+                npm ↗
+              </a>
+              <a href="https://github.com/stevecrates489-commits/tokcalc/issues" target="_blank" rel="noopener noreferrer" className="inline-flex items-center text-xs px-2.5 py-1.5 rounded-md border border-border/60 hover:border-emerald-500/40 hover:bg-muted/60 hover:text-foreground transition-colors">
+                Issues ↗
+              </a>
+            </div>
           </div>
         </div>
       </footer>
@@ -2613,57 +2552,44 @@ function ReferenceTab() {
       )}
 
       {subview === "cloud" && (
-        <>
-          {/* Unified live comparison across all providers */}
-          <LivePricingComparison />
-
-          {/* Detail: Azure live prices */}
-          <AzureLivePricing />
-
-          {/* Detail: Vast.ai marketplace spot prices */}
-          <VastAiLivePricing />
-
-          {/* Static estimates from tokcalc catalog */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-sm">Static estimates (from research catalog)</CardTitle>
-              <CardDescription className="text-xs">
-                Approximate on-demand rates from research brief. Prices vary by region, commitment, and availability.
-                Live Azure prices shown above.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="p-0">
-              <div className="overflow-x-auto">
-                <table className="w-full text-xs">
-                  <thead className="bg-muted/40 text-[10px] uppercase">
-                    <tr>
-                      <th className="text-left px-3 py-2">GPU</th>
-                      <th className="text-left px-3 py-2">Vendor</th>
-                      <th className="text-right px-3 py-2">$/hr (default)</th>
-                      <th className="text-left px-3 py-2">Typical providers</th>
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm">Cloud GPU pricing ($/hr, 2026 estimates)</CardTitle>
+            <CardDescription className="text-xs">
+              Approximate on-demand rates from research brief. Prices vary by region, commitment, and availability.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="p-0">
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead className="bg-muted/40 text-[10px] uppercase">
+                  <tr>
+                    <th className="text-left px-3 py-2">GPU</th>
+                    <th className="text-left px-3 py-2">Vendor</th>
+                    <th className="text-right px-3 py-2">$/hr (default)</th>
+                    <th className="text-left px-3 py-2">Typical providers</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {GPUS.filter(g => g.usdPerHour !== null && g.usdPerHour > 0).map(g => (
+                    <tr key={g.id} className="border-t border-border/40 hover:bg-muted/20">
+                      <td className="px-3 py-1.5 font-medium">{g.name}</td>
+                      <td className="px-3 py-1.5 text-muted-foreground">{g.vendor}</td>
+                      <td className="px-3 py-1.5 text-right font-mono">${g.usdPerHour}</td>
+                      <td className="px-3 py-1.5 text-muted-foreground text-[10px]">
+                        {g.category === "datacenter" && "RunPod · Lambda · CoreWeave · AWS · GCP"}
+                        {g.category === "workstation" && "TensorDock · RunPod"}
+                        {g.category === "consumer" && "Vast.ai · TensorDock (spot)"}
+                        {g.category === "tpu" && "Google Cloud TPU"}
+                        {g.category === "legacy" && "Secondary market"}
+                      </td>
                     </tr>
-                  </thead>
-                  <tbody>
-                    {GPUS.filter(g => g.usdPerHour !== null && g.usdPerHour > 0).map(g => (
-                      <tr key={g.id} className="border-t border-border/40 hover:bg-muted/20">
-                        <td className="px-3 py-1.5 font-medium">{g.name}</td>
-                        <td className="px-3 py-1.5 text-muted-foreground">{g.vendor}</td>
-                        <td className="px-3 py-1.5 text-right font-mono">${g.usdPerHour}</td>
-                        <td className="px-3 py-1.5 text-muted-foreground text-[10px]">
-                          {g.category === "datacenter" && "RunPod · Lambda · CoreWeave · AWS · GCP"}
-                          {g.category === "workstation" && "TensorDock · RunPod"}
-                          {g.category === "consumer" && "Vast.ai · TensorDock (spot)"}
-                          {g.category === "tpu" && "Google Cloud TPU"}
-                          {g.category === "legacy" && "Secondary market"}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </CardContent>
-          </Card>
-        </>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </CardContent>
+        </Card>
       )}
     </div>
   );
