@@ -21120,8 +21120,10 @@ function handleListGpus(input) {
     filtered = filtered.filter((g) => g.vendor === input.vendor);
   if (input.category)
     filtered = filtered.filter((g) => g.category === input.category);
-  if (input.minVramGb !== undefined)
-    filtered = filtered.filter((g) => g.vramGb >= input.minVramGb);
+  if (input.minVramGb !== undefined) {
+    const minVram = input.minVramGb;
+    filtered = filtered.filter((g) => g.vramGb >= minVram);
+  }
   return {
     count: filtered.length,
     gpus: filtered.map((g) => ({
@@ -21212,7 +21214,7 @@ var TOOL_DEFINITIONS = [
   }
 ];
 function createMcpServer() {
-  const server = new Server({ name: "tokcalc", version: "0.2.0-alpha.1" }, {
+  const server = new Server({ name: "tokcalc", version: "0.2.0" }, {
     capabilities: {
       tools: {}
     }
