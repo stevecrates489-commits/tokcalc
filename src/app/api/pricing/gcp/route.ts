@@ -10,7 +10,7 @@
 
 import { NextResponse } from "next/server";
 
-// Static Service ID for Compute Engine in GCP Cloud Billing Catalog API
+// Direct Service ID for Google Compute Engine in GCP Cloud Billing API
 const COMPUTE_ENGINE_SERVICE_ID = "6F81-5844-456A";
 
 // GCP GPU instance types to look for in SKU descriptions
@@ -73,10 +73,10 @@ export async function GET() {
   }
 
   try {
-    // Directly fetch SKUs for Compute Engine without iterating service catalog pages
+    // Fetch SKUs for Compute Engine directly using its known static service ID
     const skusUrl = `https://cloudbilling.googleapis.com/v1/services/${COMPUTE_ENGINE_SERVICE_ID}/skus?key=${apiKey}&pageSize=5000`;
     const skusResponse = await fetch(skusUrl, {
-      signal: AbortSignal.timeout(20000),
+      signal: AbortSignal.timeout(15000),
     });
 
     if (!skusResponse.ok) {
@@ -127,7 +127,8 @@ export async function GET() {
       }
 
       const pricingInfo = sku.pricingInfo?.[0];
-      const firstRate = pricingInfo?.pricingExpression?.tieredRates?.[0];
+      const tieredRates = pricingInfo?.pricingExpression?.tieredRates;
+      const firstRate = tieredRates?.[0];
       const unitPrice = firstRate?.unitPrice;
 
       if (!unitPrice) continue;
@@ -162,6 +163,7 @@ export async function GET() {
       });
     }
 
+    // Deduplicate: keep cheapest per-GPU price per GPU model
     const seen = new Map<string, CleanGcpPrice>();
     for (const p of prices) {
       const key = p.gpu;
@@ -180,14 +182,14 @@ export async function GET() {
       retrievedAt: new Date().toISOString(),
       count: deduped.length,
       prices: deduped,
-      note: "On-demand pricing from Google Cloud Billing Catalog API.",
+      note: "On-demand pricing from Google Cloud Billing Catalog API. Region varies by SKU. Requires GCP_API_KEY env var.",
     });
   } catch (error) {
     console.error("GCP pricing fetch error:", error);
     return NextResponse.json(
       {
         source: "gcp",
-        error: "Failed to fetch GCP pricing. Ensure GCP_API_KEY is active and Cloud Billing API is enabled.",
+        error: "Failed to fetch GCP pricing. Check that GCP_API_KEY is set and valid.",
         fallback: "Use Azure or Vast.ai live pricing instead.",
       },
       { status: 502 },
