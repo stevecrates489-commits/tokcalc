@@ -2,7 +2,7 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-10-17/server.schema.json",
   "name": "io.github.stevecrates489-commits/tokcalc",
   "title": "tokcalc MCP Server",
-  "description": "Open-source LLM serving capacity planner for AI agents. 7 read-only tools: estimate_capacity, compare_gpus, recommend_topology, estimate_api_vs_self_host, list_models, list_gpus, get_mlperf_benchmarks. Supports stdio (npx install for Cursor/Claude Desktop) + Streamable HTTP (public hosted endpoint at tokcalc.vercel.app/api/mcp with bearer auth + rate limiting).",
+  "description": "Open-source LLM serving capacity planner and GPU comparison tool for AI agents.",
   "version": "0.2.0",
   "status": "active",
   "repository": {

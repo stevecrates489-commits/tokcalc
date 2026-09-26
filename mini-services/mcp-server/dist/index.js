@@ -12858,6 +12858,7 @@ function datetime2(params) {
 }
 // node_modules/@modelcontextprotocol/sdk/dist/esm/types.js
 var LATEST_PROTOCOL_VERSION = "2025-11-25";
+var DEFAULT_NEGOTIATED_PROTOCOL_VERSION = "2025-03-26";
 var SUPPORTED_PROTOCOL_VERSIONS = [LATEST_PROTOCOL_VERSION, "2025-06-18", "2025-03-26", "2024-11-05", "2024-10-07"];
 var RELATED_TASK_META_KEY = "io.modelcontextprotocol/related-task";
 var JSONRPC_VERSION = "2.0";
@@ -13031,6 +13032,7 @@ var InitializeRequestSchema = RequestSchema.extend({
   method: literal("initialize"),
   params: InitializeRequestParamsSchema
 });
+var isInitializeRequest = (value) => InitializeRequestSchema.safeParse(value).success;
 var ServerCapabilitiesSchema = object({
   experimental: record(string2(), AssertObjectSchema).optional(),
   logging: AssertObjectSchema.optional(),
