@@ -4,7 +4,9 @@ import { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { ArrowLeft, Terminal, Box, Sparkles, BookOpen, Zap, ExternalLink } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { ArrowLeft, Terminal, Box, Sparkles, BookOpen, Zap, ExternalLink, Loader2, Check, Copy, AlertCircle } from "lucide-react";
 import Link from "next/link";
 
 const TOOLS = [
@@ -25,8 +27,23 @@ const EXAMPLE_PROMPTS = [
   "Recommend a topology for serving Llama 3.3 70B at 128K context with batch size 8",
 ];
 
+interface KeyResponse {
+  key: string;
+  alreadyExisted: boolean;
+  message: string;
+  expiresAt: string;
+  usage: {
+    curl: string;
+    cursor_config: string;
+  };
+}
+
 export default function McpDocsPage() {
   const [copied, setCopied] = useState<string | null>(null);
+  const [email, setEmail] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [keyData, setKeyData] = useState<KeyResponse | null>(null);
 
   const copyToClipboard = (text: string, id: string) => {
     navigator.clipboard.writeText(text);
@@ -34,7 +51,43 @@ export default function McpDocsPage() {
     setTimeout(() => setCopied(null), 1500);
   };
 
-  const cursorHostedConfig = `{
+  const handleGetKey = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    if (!email.trim()) {
+      setError("Please enter your email address.");
+      return;
+    }
+    setLoading(true);
+    setKeyData(null);
+    try {
+      const res = await fetch("/api/keys", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: email.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.detail || data.error || `Request failed (HTTP ${res.status})`);
+      }
+      setKeyData(data);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to generate API key");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const cursorHostedConfig = keyData
+    ? `{
+  "mcpServers": {
+    "tokcalc": {
+      "url": "https://tokcalc.vercel.app/api/mcp",
+      "headers": { "Authorization": "Bearer ${keyData.key}" }
+    }
+  }
+}`
+    : `{
   "mcpServers": {
     "tokcalc": {
       "url": "https://tokcalc.vercel.app/api/mcp",
@@ -61,7 +114,14 @@ tokcalc-mcp-http
 # Or with a custom port:
 PORT=8080 tokcalc-mcp-http`;
 
-  const curlTest = `curl -X POST http://localhost:3000/mcp \\
+  const curlTest = keyData
+    ? `curl -X POST https://tokcalc.vercel.app/api/mcp \\
+  -H "Content-Type: application/json" \\
+  -H "Accept: application/json, text/event-stream" \\
+  -H "MCP-Protocol-Version: 2025-03-26" \\
+  -H "Authorization: Bearer ${keyData.key}" \\
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}'`
+    : `curl -X POST http://localhost:3000/mcp \\
   -H "Content-Type: application/json" \\
   -H "Accept: application/json, text/event-stream" \\
   -H "MCP-Protocol-Version: 2025-03-26" \\
@@ -119,21 +179,135 @@ PORT=8080 tokcalc-mcp-http`;
           </CardContent>
         </Card>
 
-        {/* Install — Cursor / Claude Desktop */}
+        {/* Self-serve API key form (NEW — replaces "email hello@tokcalc.vercel.app" callout) */}
+        <Card className="border-emerald-500/30 shadow-sm mb-8">
+          <CardHeader>
+            <CardTitle className="text-base flex items-center gap-2">
+              <Zap className="size-4 text-emerald-500" />
+              Get your API key (free, instant)
+            </CardTitle>
+            <CardDescription className="text-xs">
+              Enter your email — we&apos;ll generate a bearer API key instantly. No credit card, no waiting.
+              Keys are rate-limited at 120 req/min and expire after 90 days of inactivity.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {!keyData ? (
+              <form onSubmit={handleGetKey} className="space-y-3">
+                <div>
+                  <Label htmlFor="email" className="text-xs">Email address</Label>
+                  <Input
+                    id="email"
+                    type="email"
+                    placeholder="you@example.com"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    disabled={loading}
+                    className="mt-1"
+                    required
+                  />
+                </div>
+                {error && (
+                  <div className="text-[11px] text-red-600 dark:text-red-400 flex items-start gap-1.5">
+                    <AlertCircle className="size-3.5 shrink-0 mt-0.5" />
+                    <span>{error}</span>
+                  </div>
+                )}
+                <Button type="submit" disabled={loading} className="gap-1.5">
+                  {loading ? (
+                    <>
+                      <Loader2 className="size-3.5 animate-spin" />
+                      Generating...
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles className="size-3.5" />
+                      Get my API key
+                    </>
+                  )}
+                </Button>
+                <p className="text-[10px] text-muted-foreground leading-relaxed">
+                  By requesting a key, you agree to the rate limit (120 req/min per key, 30 req/min per IP).
+                  We store your email + key hash in Upstash Redis (90-day TTL). We don&apos;t send marketing emails.
+                  Limit: 5 key requests per IP per day.
+                </p>
+              </form>
+            ) : (
+              <div className="space-y-4">
+                {/* Key display */}
+                <div className="p-3 rounded-md border border-emerald-500/40 bg-emerald-500/5">
+                  <div className="text-[10px] uppercase tracking-wider text-emerald-600 mb-1">
+                    {keyData.alreadyExisted ? "Existing key retrieved" : "Your new API key"}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <code className="font-mono text-xs break-all flex-1">{keyData.key}</code>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="text-[10px] shrink-0"
+                      onClick={() => copyToClipboard(keyData.key, "key")}
+                    >
+                      {copied === "key" ? <Check className="size-3 text-emerald-500" /> : <Copy className="size-3" />}
+                    </Button>
+                  </div>
+                  <div className="text-[10px] text-muted-foreground mt-1">
+                    Expires: {new Date(keyData.expiresAt).toLocaleDateString()} · {keyData.message}
+                  </div>
+                </div>
+
+                {/* Cursor/Claude config */}
+                <div>
+                  <Label className="text-xs">Cursor / Claude Desktop config (hosted HTTP):</Label>
+                  <div className="relative mt-1">
+                    <pre className="bg-muted rounded-md p-3 text-xs font-mono overflow-x-auto border border-border/60"><code>{cursorHostedConfig}</code></pre>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="absolute top-2 right-2 text-[10px]"
+                      onClick={() => copyToClipboard(cursorHostedConfig, "cursor-hosted")}
+                    >
+                      {copied === "cursor-hosted" ? "✓ Copied" : "Copy"}
+                    </Button>
+                  </div>
+                </div>
+
+                {/* Test curl */}
+                <div>
+                  <Label className="text-xs">Test with curl:</Label>
+                  <div className="relative mt-1">
+                    <pre className="bg-muted rounded-md p-3 text-xs font-mono overflow-x-auto border border-border/60"><code>{curlTest}</code></pre>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="absolute top-2 right-2 text-[10px]"
+                      onClick={() => copyToClipboard(curlTest, "curl-test")}
+                    >
+                      {copied === "curl-test" ? "✓ Copied" : "Copy"}
+                    </Button>
+                  </div>
+                </div>
+
+                <Button variant="outline" size="sm" onClick={() => { setKeyData(null); setEmail(""); }}>
+                  Generate another key
+                </Button>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Install — Cursor / Claude Desktop (stdio) */}
         <Card className="border-emerald-500/30 shadow-sm mb-8">
           <CardHeader>
             <CardTitle className="text-base flex items-center gap-2">
               <Terminal className="size-4 text-emerald-500" />
-              Install in Cursor / Claude Desktop (stdio transport)
+              Install in Cursor / Claude Desktop (stdio transport — alternative)
             </CardTitle>
             <CardDescription className="text-xs">
-              Recommended for local development. No HTTP server to run — Cursor/Claude spawns the process.
+              Run tokcalc locally as a stdio MCP server (Cursor spawns the process).
+              Use this if you prefer local install over the hosted endpoint above.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
-            <p className="text-xs text-muted-foreground">
-              Add this to your MCP config file:
-            </p>
             <ul className="text-xs text-muted-foreground space-y-1 ml-4 list-disc">
               <li><strong className="text-foreground">Cursor:</strong> <code className="font-mono">~/.cursor/mcp.json</code> (global) or <code className="font-mono">.cursor/mcp.json</code> (project)</li>
               <li><strong className="text-foreground">Claude Desktop:</strong> <code className="font-mono">~/Library/Application Support/Claude/claude_desktop_config.json</code> (macOS) or <code className="font-mono">%APPDATA%\Claude\claude_desktop_config.json</code> (Windows)</li>
@@ -152,55 +326,12 @@ PORT=8080 tokcalc-mcp-http`;
             </div>
             <p className="text-xs text-muted-foreground">
               Restart your editor. The 7 tools will appear in your MCP tool list within seconds.
+              No API key needed for stdio (local install).
             </p>
           </CardContent>
         </Card>
 
-        {/* Install — Public hosted endpoint (v0.2.0 final) */}
-        <Card className="border-emerald-500/30 shadow-sm mb-8">
-          <CardHeader>
-            <CardTitle className="text-base flex items-center gap-2">
-              <Zap className="size-4 text-emerald-500" />
-              Use the public hosted endpoint (v0.2.0 — recommended)
-            </CardTitle>
-            <CardDescription className="text-xs">
-              No <code>npx</code> install needed — point your AI agent directly at the public URL.
-              Backed by bearer API key auth + Upstash Redis rate limiting.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <p className="text-xs text-muted-foreground">
-              <strong className="text-foreground">Public endpoint:</strong>{" "}
-              <code className="font-mono text-emerald-500">https://tokcalc.vercel.app/api/mcp</code>
-            </p>
-            <p className="text-xs text-muted-foreground">
-              Add to your Cursor / Claude Desktop config:
-            </p>
-            <div className="relative">
-              <pre className="bg-muted rounded-md p-3 text-xs font-mono overflow-x-auto border border-border/60"><code>{cursorHostedConfig}</code></pre>
-              <Button
-                size="sm"
-                variant="ghost"
-                className="absolute top-2 right-2 text-[10px]"
-                onClick={() => copyToClipboard(cursorHostedConfig, "cursor-hosted")}
-              >
-                {copied === "cursor-hosted" ? "✓ Copied" : "Copy"}
-              </Button>
-            </div>
-            <p className="text-xs text-muted-foreground mt-3">
-              <strong className="text-foreground">Get an API key:</strong> Email{" "}
-              <a href="mailto:hello@tokcalc.vercel.app?subject=MCP%20API%20key%20request" className="text-emerald-500 hover:underline">hello@tokcalc.vercel.app</a>{" "}
-              with subject "MCP API key request" and we&apos;ll send you a key within 24 hours.
-            </p>
-            <div className="text-[11px] text-emerald-600 dark:text-emerald-400 flex items-start gap-1.5 mt-2">
-              <span className="font-medium">✓ Production-safe:</span>
-              <span>v0.2.0 is bearer-authenticated (constant-time comparison) and rate-limited
-              (30/min per IP anonymous, 120/min per API key). Safe for public exposure.</span>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Install — Self-hosted HTTP (for power users) */}
+        {/* Self-hosted HTTP (advanced) */}
         <Card className="border-border/60 shadow-sm mb-8">
           <CardHeader>
             <CardTitle className="text-base flex items-center gap-2">
@@ -222,20 +353,6 @@ PORT=8080 tokcalc-mcp-http`;
                 onClick={() => copyToClipboard(httpStartCommand, "http")}
               >
                 {copied === "http" ? "✓ Copied" : "Copy"}
-              </Button>
-            </div>
-            <p className="text-xs text-muted-foreground mt-3">
-              Test with curl:
-            </p>
-            <div className="relative">
-              <pre className="bg-muted rounded-md p-3 text-xs font-mono overflow-x-auto border border-border/60"><code>{curlTest}</code></pre>
-              <Button
-                size="sm"
-                variant="ghost"
-                className="absolute top-2 right-2 text-[10px]"
-                onClick={() => copyToClipboard(curlTest, "curl")}
-              >
-                {copied === "curl" ? "✓ Copied" : "Copy"}
               </Button>
             </div>
             <div className="text-[11px] text-emerald-600 dark:text-emerald-400 flex items-start gap-1.5 mt-2">
@@ -293,8 +410,8 @@ PORT=8080 tokcalc-mcp-http`;
             <div className="flex items-start gap-3">
               <Badge className="bg-emerald-500/10 text-emerald-600 border-emerald-500/30 text-[9px] shrink-0">✓ shipped</Badge>
               <div>
-                <div className="font-medium">v0.2.0 — public hosted endpoint</div>
-                <div className="text-muted-foreground">Live at tokcalc.vercel.app/api/mcp — no install needed</div>
+                <div className="font-medium">v0.2.0 — public hosted endpoint + self-serve API keys</div>
+                <div className="text-muted-foreground">Live at tokcalc.vercel.app/api/mcp + instant key generation at /mcp</div>
               </div>
             </div>
             <div className="flex items-start gap-3">
@@ -318,7 +435,7 @@ PORT=8080 tokcalc-mcp-http`;
           <CardContent className="space-y-2 text-xs">
             <a href="https://www.npmjs.com/package/@tokcalc/mcp-server" target="_blank" rel="noopener noreferrer" className="block p-2 rounded-md hover:bg-muted/40 transition-colors">
               <span className="font-mono text-foreground">npmjs.com/package/@tokcalc/mcp-server</span>
-              <span className="text-muted-foreground ml-2">— npm package</span>
+              <span className="text-muted-foreground ml-2">— npm package (for self-hosted stdio install)</span>
             </a>
             <a href="https://github.com/stevecrates489-commits/tokcalc/tree/main/mini-services/mcp-server" target="_blank" rel="noopener noreferrer" className="block p-2 rounded-md hover:bg-muted/40 transition-colors">
               <span className="font-mono text-foreground">github.com/stevecrates489-commits/tokcalc</span>

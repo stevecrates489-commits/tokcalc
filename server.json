@@ -1,19 +1,17 @@
 {
-  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-10-17/server.schema.json",
   "name": "io.github.stevecrates489-commits/tokcalc",
-  "title": "TokCalc MCP Server",
-  "description": "LLM capacity planning tools to estimate VRAM, compute, latency, and GPU topology for agents.",
+  "title": "tokcalc MCP Server",
+  "description": "Open-source LLM serving capacity planner for AI agents. 7 read-only tools: estimate_capacity, compare_gpus, recommend_topology, estimate_api_vs_self_host, list_models, list_gpus, get_mlperf_benchmarks. Supports stdio (npx install for Cursor/Claude Desktop) + Streamable HTTP (public hosted endpoint at tokcalc.vercel.app/api/mcp with bearer auth + rate limiting).",
   "version": "0.2.0",
+  "status": "active",
   "repository": {
-    "url": "https://github.com/stevecrates489-commits/tokcalc.git",
+    "type": "git",
+    "url": "https://github.com/stevecrates489-commits/tokcalc",
     "source": "github"
   },
-  "remotes": [
-    {
-      "type": "streamable-http",
-      "url": "https://tokcalc.vercel.app/api/mcp"
-    }
-  ],
+  "homepage": "https://tokcalc.vercel.app",
+  "license": "Apache-2.0",
   "packages": [
     {
       "registryType": "npm",
@@ -21,6 +19,16 @@
       "version": "0.2.0",
       "transport": {
         "type": "stdio"
+      }
+    }
+  ],
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://tokcalc.vercel.app/api/mcp",
+      "auth": {
+        "type": "bearer",
+        "header": "Authorization"
       }
     }
   ]

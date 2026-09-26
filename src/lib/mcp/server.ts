@@ -1,11 +1,11 @@
-/**
- * tokcalc MCP Server — server factory + tool registrations.
+﻿/**
+ * tokcalc MCP Server â€” server factory + tool registrations.
  *
  * Defines the 7 read-only planning tools and a factory function
  * that wires them into a fresh Server instance.
  *
  * Used by both the stdio entry point (index.ts) and the HTTP
- * entry point (http.ts) — each creates its own server instance
+ * entry point (http.ts) â€” each creates its own server instance
  * via createMcpServer() to avoid shared transport state.
  *
  * Per v0.2.0 research (Perplexity brief, 2025-09-25):
@@ -13,13 +13,13 @@
  *    to stdio and multiple HTTP transports. Instead, use a factory."
  *
  * Tools:
- *   1. estimate_capacity — VRAM/KV/throughput/latency/cost for one config
- *   2. compare_gpus — ranked GPU comparison for one workload
- *   3. recommend_topology — TP/CP topology recommendation
- *   4. estimate_api_vs_self_host — break-even analysis
- *   5. list_models — discover supported model IDs
- *   6. list_gpus — discover supported GPU IDs
- *   7. get_mlperf_benchmarks — curated MLPerf v4.1 reference configs
+ *   1. estimate_capacity â€” VRAM/KV/throughput/latency/cost for one config
+ *   2. compare_gpus â€” ranked GPU comparison for one workload
+ *   3. recommend_topology â€” TP/CP topology recommendation
+ *   4. estimate_api_vs_self_host â€” break-even analysis
+ *   5. list_models â€” discover supported model IDs
+ *   6. list_gpus â€” discover supported GPU IDs
+ *   7. get_mlperf_benchmarks â€” curated MLPerf v4.1 reference configs
  */
 
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
@@ -204,11 +204,11 @@ function handleEstimateCapacity(input: z.infer<typeof EstimateCapacitySchema>) {
       memory: result.confidence.totalVramNeededGb,
     },
     assumptions: [
-      `η_mem = 0.65 (typical real-world memory utilization)`,
-      `η_compute = 0.50 (typical compute utilization)`,
+      `Î·_mem = 0.65 (typical real-world memory utilization)`,
+      `Î·_compute = 0.50 (typical compute utilization)`,
       `KV cache in FP16 (2 bytes per value)`,
       `Engine: ${input.engine} (affects efficiency factors)`,
-      `Continuous batching: ${input.continuousBatching ? `${input.continuousBatchingMultiplier}× multiplier` : "disabled"}`,
+      `Continuous batching: ${input.continuousBatching ? `${input.continuousBatchingMultiplier}Ã— multiplier` : "disabled"}`,
       `These are planning estimates, not deployment guarantees`,
     ],
     catalogVersion: "0.3.0",
@@ -258,7 +258,7 @@ function handleCompareGpus(input: z.infer<typeof CompareGpusSchema>) {
     comparisons: sorted,
     totalCandidates: results.length,
     sortBy: input.sortBy,
-    assumptions: [`Region: us-east-1 (default)`, `On-demand pricing`, `η_mem = 0.65`, `Catalog version: 0.3.0`],
+    assumptions: [`Region: us-east-1 (default)`, `On-demand pricing`, `Î·_mem = 0.65`, `Catalog version: 0.3.0`],
   };
 }
 
@@ -289,7 +289,7 @@ function handleRecommendTopology(input: z.infer<typeof RecommendTopologySchema>)
     model: { name: model.name, paramsB: model.paramsB, activeParamsB: model.activeParamsB, isMoE: model.isMoE },
     context: { tokens: input.contextTokens, label: fmtContext(input.contextTokens) },
     recommendations: results,
-    formula: `KV per request = 2 × ${model.layers} layers × ${model.kvHeads} KV heads × ${model.headDim} head_dim × 2 bytes × ${input.contextTokens} tokens = ${computeKVCacheGb(model, input.contextTokens, 1).toFixed(2)} GB`,
+    formula: `KV per request = 2 Ã— ${model.layers} layers Ã— ${model.kvHeads} KV heads Ã— ${model.headDim} head_dim Ã— 2 bytes Ã— ${input.contextTokens} tokens = ${computeKVCacheGb(model, input.contextTokens, 1).toFixed(2)} GB`,
     assumptions: [`Single GPU unless TP needed`, `KV cache in FP16`, `Model weights + KV must fit in total VRAM`, `Catalog version: 0.3.0`],
   };
 }
@@ -341,7 +341,7 @@ function handleEstimateApiVsSelfHost(input: z.infer<typeof EstimateApiVsSelfHost
     breakEven: {
       requestsPerDay: Math.round(breakEven),
       reached: meetsVolume,
-      explanation: `At ${input.utilization}% utilization with ${input.gpuCount}× ${gpu?.name || input.gpu}, self-hosting breaks even at ${Math.round(breakEven).toLocaleString()} requests/day.`,
+      explanation: `At ${input.utilization}% utilization with ${input.gpuCount}Ã— ${gpu?.name || input.gpu}, self-hosting breaks even at ${Math.round(breakEven).toLocaleString()} requests/day.`,
     },
     assumptions: [
       `Self-host throughput: ${fmtTokens(sh.aggregateTokensPerSec)} tok/s at ${input.utilization}% utilization`,
@@ -489,8 +489,8 @@ const TOOL_DEFINITIONS = [
  * Create a fresh MCP Server instance with all 7 tools wired.
  *
  * Used by:
- *   - stdio entry point (index.ts) — one server per process
- *   - HTTP entry point (http.ts) — one server per request (stateless mode)
+ *   - stdio entry point (index.ts) â€” one server per process
+ *   - HTTP entry point (http.ts) â€” one server per request (stateless mode)
  *
  * Each caller creates its own instance via this factory to avoid
  * shared transport state (per v0.2.0 research recommendation #5:
