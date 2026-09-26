@@ -1,6 +1,23 @@
 /**
- * AWS EC2 pricing proxy — uses public bulk pricing files (NO IAM credentials required).
- * Optimized to extract GPU pricing without throwing out-of-memory errors on serverless.
+ * AWS EC2 pricing proxy.
+ *
+ * IMPORTANT — Vercel Hobby plan hard limits:
+ *   - Memory: 1024 MB max
+ *   - Function duration: 15 s max
+ *
+ * The EC2 us-east-1 bulk pricing JSON is ~80 MB download / ~300 MB parsed.
+ * That exceeds both Hobby limits — the function either OOMs (500) or times
+ * out (504). Live AWS pricing therefore cannot run on Hobby.
+ *
+ * This route serves a verified-static fallback (Sept 2026, us-east-1, Linux,
+ * on-demand, shared tenancy) so the UI shows real AWS pricing without
+ * requiring a Vercel plan upgrade.
+ *
+ * To re-enable live AWS pricing:
+ *   1. Upgrade to Vercel Pro ($20/mo, 3008 MB / 60 s).
+ *   2. Restore the live-fetch block at the bottom of this file (search for
+ *      "LIVE FETCH BLOCK — UNCOMMENT ON PRO PLAN").
+ *   3. Optionally bump the route's memory in vercel.json if needed.
  */
 
 import { NextResponse } from "next/server";
@@ -20,10 +37,7 @@ const GPU_TARGETS = [
   { instanceType: "g4dn.xlarge", gpu: "T4", count: 1 },
 ];
 
-// Static fallback prices for Vercel Hobby plan (1024 MB memory ceiling).
-// The EC2 us-east-1 bulk JSON is ~80 MB download / ~300 MB parsed, which
-// exceeds Hobby's memory cap. To get live data, upgrade to Pro (3008 MB)
-// and set ALLOW_LIVE_AWS_PRICING=1 on Vercel env vars.
+// Static fallback prices for Vercel Hobby plan.
 // Verified Sept 2026 — us-east-1, Linux, on-demand, shared tenancy.
 const STATIC_AWS_GPU_PRICES: CleanGpuPrice[] = [
   { gpu: "H100", instanceType: "p5.48xlarge", pricePerGpuHour: 12.29, instancePriceHour: 98.32, gpuCount: 8, region: "us-east-1", retrievedAt: "2026-09-01T00:00:00.000Z" },
@@ -38,7 +52,6 @@ const STATIC_AWS_GPU_PRICES: CleanGpuPrice[] = [
 ];
 
 let cache: { data: CleanGpuPrice[]; timestamp: number } | null = null;
-const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 
 interface CleanGpuPrice {
   gpu: string;
@@ -51,7 +64,33 @@ interface CleanGpuPrice {
 }
 
 export async function GET() {
-  if (cache && Date.now() - cache.timestamp < CACHE_TTL_MS) {
+  // Serve static prices immediately. No fetch, no timeout possible.
+  // Cached for 24h so subsequent calls return in <10ms.
+  if (!cache || Date.now() - cache.timestamp > 24 * 60 * 60 * 1000) {
+    cache = { data: STATIC_AWS_GPU_PRICES, timestamp: Date.now() };
+  }
+  return NextResponse.json(
+    {
+      source: "aws",
+      cached: cache.timestamp !== Date.now(),
+      retrievedAt: new Date(cache.timestamp).toISOString(),
+      count: cache.data.length,
+      prices: cache.data,
+      note: "Static fallback (verified Sept 2026 — us-east-1, Linux, on-demand, shared tenancy). Live AWS pricing requires Vercel Pro (3008 MB / 60 s).",
+    },
+    { headers: { "Cache-Control": "public, s-maxage=3600, stale-while-revalidate=86400" } },
+  );
+}
+
+/* =============================================================
+   LIVE FETCH BLOCK — UNCOMMENT ON PRO PLAN
+   =============================================================
+   When you upgrade to Vercel Pro, replace the GET() body above with the
+   block below (and remove the cache short-circuit so live data takes
+   precedence over the static fallback). The fetch will fit in 3008 MB.
+
+export async function GET() {
+  if (cache && Date.now() - cache.timestamp < 24 * 60 * 60 * 1000) {
     return NextResponse.json(
       {
         source: "aws",
@@ -60,27 +99,8 @@ export async function GET() {
         count: cache.data.length,
         prices: cache.data,
         note: cache.data === STATIC_AWS_GPU_PRICES
-          ? "Static fallback (set ALLOW_LIVE_AWS_PRICING=1 to enable live fetch)"
+          ? "Static fallback (Pro plan required for live fetch)"
           : "Live data from AWS bulk JSON",
-      },
-      { headers: { "Cache-Control": "public, s-maxage=3600, stale-while-revalidate=86400" } },
-    );
-  }
-
-  const allowLive = process.env.ALLOW_LIVE_AWS_PRICING === "1";
-  if (!allowLive) {
-    // Vercel Hobby plan caps function memory at 1024 MB which is insufficient
-    // for the ~300 MB parsed EC2 bulk JSON. Return static fallback by default.
-    // To enable live data: upgrade to Pro (3008 MB) + set ALLOW_LIVE_AWS_PRICING=1.
-    cache = { data: STATIC_AWS_GPU_PRICES, timestamp: Date.now() };
-    return NextResponse.json(
-      {
-        source: "aws",
-        cached: false,
-        retrievedAt: new Date(cache.timestamp).toISOString(),
-        count: STATIC_AWS_GPU_PRICES.length,
-        prices: STATIC_AWS_GPU_PRICES,
-        note: "Static fallback (set ALLOW_LIVE_AWS_PRICING=1 to enable live fetch; requires Vercel Pro for sufficient memory)",
       },
       { headers: { "Cache-Control": "public, s-maxage=3600, stale-while-revalidate=86400" } },
     );
@@ -88,85 +108,36 @@ export async function GET() {
 
   try {
     const url = "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonEC2/current/us-east-1/index.json";
-
     const response = await fetch(url, {
-      signal: AbortSignal.timeout(12000),
+      signal: AbortSignal.timeout(45000),
       headers: { Accept: "application/json" },
     });
+    if (!response.ok) throw new Error(`AWS pricing API returned ${response.status}`);
 
-    if (!response.ok) {
-      throw new Error(`AWS pricing API returned ${response.status}`);
-    }
-
-    const data = (await response.json()) as {
-      products?: Record<
-        string,
-        {
-          productFamily?: string;
-          attributes?: {
-            instanceType?: string;
-            operatingSystem?: string;
-            tenancy?: string;
-            capacitystatus?: string;
-          };
-        }
-      >;
-      terms?: {
-        OnDemand?: Record<
-          string,
-          Record<
-            string,
-            {
-              priceDimensions?: Record<
-                string,
-                { pricePerUnit?: { USD?: string } }
-              >;
-            }
-          >
-        >;
-      };
+    const data = await response.json() as {
+      products?: Record<string, { attributes?: { instanceType?: string; operatingSystem?: string; tenancy?: string; capacitystatus?: string } }>;
+      terms?: { OnDemand?: Record<string, Record<string, { priceDimensions?: Record<string, { pricePerUnit?: { USD?: string } }> }>> };
     };
 
     const products = data.products || {};
     const onDemandTerms = data.terms?.OnDemand || {};
-    const prices: CleanGpuPrice[] = [];
-
     const targetMap = new Map(GPU_TARGETS.map((t) => [t.instanceType, t]));
+    const prices: CleanGpuPrice[] = [];
 
     for (const [sku, product] of Object.entries(products)) {
       const attrs = product.attributes || {};
-      const instanceType = attrs.instanceType || "";
-
-      const target = targetMap.get(instanceType);
+      const target = targetMap.get(attrs.instanceType || "");
       if (!target) continue;
-
-      if (
-        attrs.operatingSystem !== "Linux" ||
-        attrs.tenancy !== "Shared" ||
-        attrs.capacitystatus !== "Used"
-      ) {
-        continue;
-      }
-
-      const skuTerms = onDemandTerms[sku];
-      if (!skuTerms) continue;
-
-      const offerTerm = Object.values(skuTerms)[0];
-      if (!offerTerm?.priceDimensions) continue;
-
-      const priceDim = Object.values(offerTerm.priceDimensions)[0];
-      const usdPrice = priceDim?.pricePerUnit?.USD;
+      if (attrs.operatingSystem !== "Linux" || attrs.tenancy !== "Shared" || attrs.capacitystatus !== "Used") continue;
+      const offerTerm = Object.values(onDemandTerms[sku] || {})[0];
+      const usdPrice = Object.values(offerTerm?.priceDimensions || {})[0]?.pricePerUnit?.USD;
       if (!usdPrice) continue;
-
       const instancePriceHour = parseFloat(usdPrice);
       if (isNaN(instancePriceHour) || instancePriceHour <= 0) continue;
-
-      const pricePerGpuHour = Math.round((instancePriceHour / target.count) * 100) / 100;
-
       prices.push({
         gpu: target.gpu,
-        instanceType,
-        pricePerGpuHour,
+        instanceType: target.instanceType,
+        pricePerGpuHour: Math.round((instancePriceHour / target.count) * 100) / 100,
         instancePriceHour: Math.round(instancePriceHour * 100) / 100,
         gpuCount: target.count,
         region: "us-east-1",
@@ -174,19 +145,14 @@ export async function GET() {
       });
     }
 
-    // Deduplicate: keep cheapest per-GPU price
     const seen = new Map<string, CleanGpuPrice>();
     for (const p of prices) {
-      const key = p.gpu;
-      if (!seen.has(key) || seen.get(key)!.pricePerGpuHour > p.pricePerGpuHour) {
-        seen.set(key, p);
+      if (!seen.has(p.gpu) || seen.get(p.gpu)!.pricePerGpuHour > p.pricePerGpuHour) {
+        seen.set(p.gpu, p);
       }
     }
-
     const deduped = Array.from(seen.values()).sort((a, b) => a.pricePerGpuHour - b.pricePerGpuHour);
-
     cache = { data: deduped, timestamp: Date.now() };
-
     return NextResponse.json(
       {
         source: "aws",
@@ -194,14 +160,12 @@ export async function GET() {
         retrievedAt: new Date().toISOString(),
         count: deduped.length,
         prices: deduped,
-        note: "On-demand Linux pricing from AWS public bulk files. No IAM credentials required. Region: us-east-1.",
+        note: "On-demand Linux pricing from AWS public bulk files. Region: us-east-1.",
       },
       { headers: { "Cache-Control": "public, s-maxage=3600, stale-while-revalidate=86400" } },
     );
   } catch (error) {
-    // Live fetch failed (OOM, timeout, or 5xx) — fall back to static prices
-    // instead of returning a 502 so the UI stays functional.
-    console.error("[aws-pricing] Live fetch failed, falling back to static prices:", error);
+    console.error("[aws-pricing] Live fetch failed, serving static fallback:", error);
     cache = { data: STATIC_AWS_GPU_PRICES, timestamp: Date.now() };
     return NextResponse.json(
       {
@@ -210,9 +174,10 @@ export async function GET() {
         retrievedAt: new Date(cache.timestamp).toISOString(),
         count: STATIC_AWS_GPU_PRICES.length,
         prices: STATIC_AWS_GPU_PRICES,
-        note: `Live fetch failed (${error instanceof Error ? error.message : String(error)}); using static fallback`,
+        note: `Live fetch failed; using static fallback (${error instanceof Error ? error.message : String(error)})`,
       },
       { headers: { "Cache-Control": "public, s-maxage=3600, stale-while-revalidate=86400" } },
     );
   }
 }
+   ============================================================= */
