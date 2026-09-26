@@ -73,14 +73,44 @@ export async function GET() {
   }
 
   try {
-    // Fetch SKUs for Compute Engine directly using its known static service ID
-    const skusUrl = `https://cloudbilling.googleapis.com/v1/services/${COMPUTE_ENGINE_SERVICE_ID}/skus?key=${apiKey}&pageSize=5000`;
-    const skusResponse = await fetch(skusUrl, {
-      signal: AbortSignal.timeout(15000),
-    });
+    // Resolve the Compute Engine service ID. Prefer the static well-known ID
+    // for speed; if it 404s (e.g. Google changed IDs, or the API key's project
+    // doesn't expose this service), fall back to listing services and picking
+    // the one whose displayName is "Compute Engine".
+    let serviceId = COMPUTE_ENGINE_SERVICE_ID;
+    let skusResponse = await fetch(
+      `https://cloudbilling.googleapis.com/v1/services/${serviceId}/skus?key=${apiKey}&pageSize=5000`,
+      { signal: AbortSignal.timeout(15000) },
+    );
+
+    if (skusResponse.status === 404) {
+      console.warn(`[gcp-pricing] Static service ID ${serviceId} returned 404, attempting dynamic lookup…`);
+      const listRes = await fetch(
+        `https://cloudbilling.googleapis.com/v1/services?key=${apiKey}&pageSize=200`,
+        { signal: AbortSignal.timeout(15000) },
+      );
+      if (listRes.ok) {
+        const list = (await listRes.json()) as { services?: Array<{ serviceId: string; displayName: string }> };
+        const ce = (list.services || []).find((s) => /compute engine/i.test(s.displayName));
+        if (ce) {
+          serviceId = ce.serviceId;
+          console.warn(`[gcp-pricing] Resolved Compute Engine service ID dynamically: ${serviceId}`);
+          skusResponse = await fetch(
+            `https://cloudbilling.googleapis.com/v1/services/${serviceId}/skus?key=${apiKey}&pageSize=5000`,
+            { signal: AbortSignal.timeout(15000) },
+          );
+        }
+      }
+    }
 
     if (!skusResponse.ok) {
-      throw new Error(`GCP SKUs API returned ${skusResponse.status}`);
+      const errBody = await skusResponse.text().catch(() => "");
+      throw new Error(
+        `GCP SKUs API returned ${skusResponse.status} for service ${serviceId}. ` +
+          `This usually means the GCP_API_KEY is missing the Cloud Billing API scope, ` +
+          `the API isn't enabled on the key's GCP project, or the key has IP restrictions. ` +
+          `Raw response: ${errBody.slice(0, 200)}`,
+      );
     }
 
     const skusData = (await skusResponse.json()) as {
