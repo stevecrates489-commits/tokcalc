@@ -2287,6 +2287,24 @@ function LivePricingCard() {
 
   useEffect(() => {
     let cancelled = false;
+
+    // sessionStorage cache — restore instantly when switching sections within
+    // the same tab. Cleared on Refresh button click or tab close.
+    try {
+      const cached = sessionStorage.getItem("tokcalc_live_pricing_v3");
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (parsed?.data) {
+          setData(parsed.data);
+          setErrors(parsed.errors || {});
+          setLoading(false);
+          return; // Skip the network fetch entirely
+        }
+      }
+    } catch {
+      // sessionStorage unavailable or parse failed — fall through to fetch
+    }
+
     setLoading(true);
     setErrors({});
 
@@ -2321,6 +2339,17 @@ function LivePricingCard() {
       setData(newData);
       setErrors(newErrors);
       setLoading(false);
+
+      // Persist to sessionStorage so switching tabs/sections is instant
+      try {
+        sessionStorage.setItem("tokcalc_live_pricing_v3", JSON.stringify({
+          data: newData,
+          errors: newErrors,
+          savedAt: Date.now(),
+        }));
+      } catch {
+        // sessionStorage full or unavailable — silently ignore
+      }
     });
 
     return () => { cancelled = true; };
@@ -2392,7 +2421,10 @@ function LivePricingCard() {
           <Button
             size="sm"
             variant="outline"
-            onClick={() => setRefreshKey(k => k + 1)}
+            onClick={() => {
+              try { sessionStorage.removeItem("tokcalc_live_pricing_v3"); } catch {}
+              setRefreshKey(k => k + 1);
+            }}
             disabled={loading}
             className="text-xs gap-1.5"
           >
