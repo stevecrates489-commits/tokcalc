@@ -6,10 +6,11 @@
 
 **Plan your LLM deployment before you rent the GPUs.**
 
-[![Live demo](https://img.shields.io/badge/live-demo-10b981?style=flat-square)](https://tokcalc.dev)
+[![Live demo](https://img.shields.io/badge/live-demo-10b981?style=flat-square)](https://tokcalc.vercel.app)
 [![License: Apache 2.0](https://img.shields.io/badge/license-Apache_2.0-blue?style=flat-square)](LICENSE)
 [![PRs welcome](https://img.shields.io/badge/PRs-welcome-10b981?style=flat-square)](CONTRIBUTING.md)
 [![Made with Next.js](https://img.shields.io/badge/made_with-Next.js_16-black?style=flat-square)](https://nextjs.org)
+[![MCP server](https://img.shields.io/badge/MCP-@tokcalc/mcp--server-10b981?style=flat-square)](https://www.npmjs.com/package/@tokcalc/mcp-server)
 
 </div>
 
@@ -19,7 +20,7 @@
 
 ![tokcalc demo](/public/tokcalc-demo.gif)
 
-*Switch model → multi-GPU → long-context capacity planner → Build vs Buy → Reference catalog*
+*Switch model → multi-GPU → long-context capacity planner → Build vs Buy → Reference catalog → Live GPU pricing*
 
 </div>
 
@@ -34,7 +35,7 @@ Not another static "tokens per second" calculator.
 
 ## Try it now
 
-**[tokcalc.dev](https://tokcalc.dev)** — no signup, no tracking, no paywall.
+**[tokcalc.vercel.app](https://tokcalc.vercel.app)** — no signup, no tracking, no paywall.
 
 Pick a model, a GPU, and a workload. Get an instant capacity plan:
 
@@ -43,13 +44,16 @@ Pick a model, a GPU, and a workload. Get an instant capacity plan:
 - VRAM budget with KV-cache sizing
 - Multi-GPU topology recommendation (Single GPU → TP×2/4/8 → Context Parallel)
 - Monthly cost + break-even vs API pricing
+- **Live GPU pricing** across Azure + AWS + GCP + Vast.ai marketplace (fetched in parallel)
 - **Shareable URL** — your config encoded in the URL hash, send to colleagues
+- **Copy as Markdown** — paste the full result into GitHub issues / Slack / docs
 
 ## Why tokcalc?
 
 The market has dozens of "tokens per second" calculators and self-host-vs-API
 break-even tools (induwara.lk, gigagpu, kickllm, cloudparity, curlscape,
-profitable.ai). None of them are unified capacity planners.
+profitable.ai). None of them are unified capacity planners — and none show
+their math.
 
 ### What tokcalc answers that competitors can't
 
@@ -60,6 +64,8 @@ profitable.ai). None of them are unified capacity planners.
 > *"Does FP8 or AWQ save more money once quality, KV cache, and engine support are included?"*
 
 > *"At what daily volume does an H100 beat GPT-4o pricing?"*
+
+> *"What's the cheapest H100 right now across Azure / AWS / GCP / Vast.ai?"*
 
 > *"What happens to cost and latency if an agent makes 8 model calls, has 3 tool calls, and its context grows by 5K tokens each turn?"*
 
@@ -82,6 +88,7 @@ profitable.ai). None of them are unified capacity planners.
 | **Long-context capacity** | KV memory + max concurrency + prefill time at 4K → 1M context |
 | **Topology recommendation** | Single GPU → TP×2 → TP×4 → TP×8 → TP×8 + Context Parallel (RingAttention) |
 | **Cost economics** | GPU $/hr → $/M output tokens → $/request → monthly cost |
+| **Observed benchmark calibration** | Paste vLLM/SGLang/TRT-LLM JSON → see formula accuracy verdict (validated / underestimated / overestimated) |
 
 ### Build vs Buy tab
 
@@ -92,12 +99,13 @@ Independent calculator (separate state) that compares:
 
 ### Reference tab
 
-5 sub-tables — fully transparent, every record source-linked where available:
+6 sub-tables — fully transparent, every record source-linked where available:
 - **Models** (35 entries: Llama 4 Scout/Maverick, Qwen 3 family, DeepSeek V3/R1, Pixtral, BGE-M3, ...)
 - **GPUs** (30 entries: H100/H200/B200/B300, AMD MI300X/MI325X, Intel Gaudi 3, TPU v5p/Trillium, Groq LPU, Cerebras WSE-3, Apple M2/M3/M4 Ultra, ...)
 - **Quantization** (16 formats: FP16/BF16, GGUF Q2_K→Q8_0, GPTQ, AWQ, EXL2, FP8, NVFP4)
 - **API pricing** (13 models with input/cached/output + retired/current status)
-- **Cloud GPU pricing** (all GPUs with $/hr > 0 + typical providers)
+- **Cloud GPU pricing** (all GPUs with $/hr > 0 + typical providers — static curated)
+- **🔴 Live pricing** (real-time fetch from Azure + AWS + GCP + Vast.ai in parallel — LIVE badges + timestamps)
 
 ### The long-context capacity planner (the differentiator)
 
@@ -120,6 +128,21 @@ tokcalc shows you:
 - Prefill time (with superlinear attention correction beyond 32K)
 - Required topology (Single GPU → TP×2/4/8 → TP×8 + Context Parallel)
 - RingAttention citation when CP is needed
+
+### Live GPU pricing (NEW)
+
+The 🔴 Live pricing sub-tab in Reference fetches real-time GPU prices from 4 providers in parallel via `Promise.allSettled`:
+
+| Provider | API | Auth | Cache TTL |
+|---|---|---|---|
+| **Azure** | Retail Prices API | None (public) | 24h |
+| **AWS** | EC2 bulk pricing file | None (public) | 24h |
+| **GCP** | Cloud Billing Catalog API | `GCP_API_KEY` env var | 24h |
+| **Vast.ai** | Marketplace bundles API | None (public) | 5m (spot prices change rapidly) |
+
+Each provider shows a LIVE badge with timestamp + cache state. The comparison table shows the cheapest price per GPU across all 4 providers (highlighted in emerald) + per-provider breakdown.
+
+If any provider fails (e.g., GCP_API_KEY not set), the others still work — graceful degradation per provider.
 
 ## The math, transparently
 
@@ -240,9 +263,14 @@ running at 10% utilization pays 10× more per token than the theoretical minimum
 | Prompt-cache economics | — | partial API only | — | **✓** |
 | Reasoning tokens (o1/R1/Claude thinking) | — | — | — | **✓** |
 | API vs self-host break-even | some | ✓ | — | **✓** |
+| **Live cloud GPU pricing (4 providers)** | — | — | — | **✓** |
+| **Observed benchmark calibration** | — | — | — | **✓** |
+| **MCP server for AI agents** | — | — | — | **✓** |
+| **Public hosted MCP endpoint + self-serve keys** | — | — | — | **✓** |
 | Transparent formulas / open source | mixed | usually no | mixed | **✓** |
 | Cited benchmark evidence per config | rare | rare | ✓ (not planning) | **✓ (in progress)** |
 | Shareable URL per config | — | — | — | **✓** |
+| Copy result as Markdown | — | — | — | **✓** |
 
 ## Roadmap
 
@@ -252,23 +280,31 @@ running at 10% utilization pays 10× more per token than the theoretical minimum
 - ✅ TTFT/ITL split, long-context superlinear attention
 - ✅ Long-context capacity planner + topology recommendation
 - ✅ Build-vs-Buy calculator (13 API providers with retired/current status)
-- ✅ Reference catalog (5 sub-tables)
+- ✅ Reference catalog (6 sub-tables including live pricing)
+- ✅ **Live GPU pricing** (Azure + AWS + GCP + Vast.ai parallel fetch with LIVE badges)
+- ✅ **Observed benchmark calibration** (paste vLLM/SGLang/TRT-LLM JSON → verdict)
+- ✅ **MCP server v0.2.0** — 7 read-only tools, stdio + Streamable HTTP transports
+- ✅ **Public hosted MCP endpoint** at `tokcalc.vercel.app/api/mcp` with bearer auth + Upstash Redis rate limiting
+- ✅ **Self-serve API key generation** at `tokcalc.vercel.app/mcp` (email → instant key)
+- ✅ **4 SEO landing pages**: `/compare/h100-vs-h200`, `/compare/gguf-q4-k-m-vs-q5-k-m`, `/self-host-vs-openai-api`, `/mcp` (install docs)
 - ✅ Share URL + localStorage persistence
+- ✅ Copy result as Markdown (for GitHub issues / Slack / docs)
 - ✅ Dark mode toggle
 - ✅ Plain-English glossary (28 terms with hover tooltips)
 - ✅ OG image + Twitter card + social metadata
+- ✅ Plausible Analytics (privacy-friendly) + Sentry error monitoring
 
 ### Next 30 days
 - ⏳ GitHub Action (`tokcalc/plan` PR comment)
-- ⏳ MCP server (read-only capacity-planning tools for AI agents)
-- ⏳ 3 SEO landing pages (`/compare/h100-vs-h200`, `/gguf-q4-k-m-vs-q5-k-m`, `/vllm-vs-sglang`)
 - ⏳ i18n: Chinese, Japanese, Korean
+- ⏳ MCP server v0.2.1: Fix empty `inputSchema` in `tools/list` response (zod-to-json-schema serialization issue)
+- ⏳ MCP server v0.3.0: OAuth 2.1 with PKCE for multi-user auth
 
 ### Next 90 days
 - ⏳ Workload-trace / SLO capacity planner (prompt/output/arrival distributions, p50/p95 TTFT/ITL)
 - ⏳ P/D disaggregation planner (separate prefill + decode pools)
 - ⏳ Cache-aware economics (prefix-sharing distribution, multi-turn/agent traces)
-- ⏳ Engine-aware presets (vLLM / SGLang / TensorRT-LLM / llama.cpp)
+- ⏳ Engine-aware presets (vLLM / SGLang / TensorRT-LLM / llama.cpp) — UI integration
 - ⏳ Versioned price + benchmark provenance system
 
 ### Long-term
@@ -320,7 +356,11 @@ We welcome contributions! See [CONTRIBUTING.md](CONTRIBUTING.md) for:
 
 tokcalc ships an [MCP (Model Context Protocol)](https://modelcontextprotocol.io) server that lets AI agents (Cursor, Claude Desktop, Cline) call tokcalc during design reviews.
 
-### 6 read-only tools
+**npm package**: [`@tokcalc/mcp-server`](https://www.npmjs.com/package/@tokcalc/mcp-server) (latest: v0.2.0)
+**Public endpoint**: `https://tokcalc.vercel.app/api/mcp` (Streamable HTTP, bearer auth, rate-limited)
+**Install docs**: `https://tokcalc.vercel.app/mcp`
+
+### 7 read-only tools
 
 | Tool | What it does |
 |---|---|
@@ -330,12 +370,33 @@ tokcalc ships an [MCP (Model Context Protocol)](https://modelcontextprotocol.io)
 | `estimate_api_vs_self_host` | Break-even analysis |
 | `list_models` | Discover supported model IDs |
 | `list_gpus` | Discover supported GPU IDs |
+| `get_mlperf_benchmarks` | Curated MLPerf Inference v4.1 audited reference configs |
 
 All tools are **read-only** — no side effects, no cloud credentials, no deployments.
 
-### Install
+### Option A: Public hosted endpoint (recommended — no install)
 
-Add to your Claude Desktop config (`~/Library/Application Support/Claude/claude_desktop_config.json` on macOS):
+Point Cursor or Claude Desktop at the public endpoint. Get an instant API key at [`/mcp`](https://tokcalc.vercel.app/mcp):
+
+```json
+{
+  "mcpServers": {
+    "tokcalc": {
+      "url": "https://tokcalc.vercel.app/api/mcp",
+      "headers": { "Authorization": "Bearer <your-api-key>" }
+    }
+  }
+}
+```
+
+Features:
+- ✅ **Bearer API key auth** (constant-time comparison via `crypto.timingSafeEqual`)
+- ✅ **KV-backed rate limiting** via Upstash Redis (30 req/min per IP, 120 req/min per key)
+- ✅ **Self-serve key generation** — enter email at `/mcp`, get instant key (5 per IP per day limit)
+- ✅ Keys expire after 90 days of inactivity
+- ✅ SHA-256 key hashing (never stored raw)
+
+### Option B: Self-hosted stdio (for local Cursor / Claude Desktop)
 
 ```json
 {
@@ -348,14 +409,16 @@ Add to your Claude Desktop config (`~/Library/Application Support/Claude/claude_
 }
 ```
 
-Or run locally:
+No API key needed for stdio (local install). Cursor spawns the process via `npx`.
+
+### Option C: Self-hosted HTTP (for air-gapped / custom infra)
 
 ```bash
-git clone https://github.com/stevecrates489-commits/tokcalc.git
-cd tokcalc
-bun install
-bun mini-services/mcp-server/index.ts
+npm install -g @tokcalc/mcp-server
+tokcalc-mcp-http  # defaults to port 3000
 ```
+
+Set `MCP_API_KEY`, `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN` env vars for auth + rate limiting.
 
 ### Example agent prompt
 
@@ -365,13 +428,69 @@ The agent calls `list_models` → `list_gpus` → `recommend_topology` → `esti
 
 ## Tech stack
 
-- **Framework**: Next.js 16 with App Router
+- **Framework**: Next.js 16 with App Router (Turbopack)
 - **Language**: TypeScript 5
 - **Styling**: Tailwind CSS 4 + shadcn/ui (New York)
 - **Charts**: Recharts
 - **State**: React hooks (useState + useEffect + useMemo)
 - **Theme**: next-themes (dark mode default)
-- **Database**: None (pure client-side, no backend required for core features)
+- **MCP SDK**: `@modelcontextprotocol/sdk` v1.30.1 (Streamable HTTP transport, stateless mode)
+- **Auth**: `crypto.timingSafeEqual` (constant-time bearer key validation)
+- **Rate limiting**: `@upstash/ratelimit` + `@upstash/redis` (sliding window, 30/min per IP, 120/min per key)
+- **Analytics**: Plausible (privacy-friendly, no cookies)
+- **Error monitoring**: Sentry
+- **Database**: None for core; Upstash Redis for API key storage + rate limiting
+
+## Project structure
+
+```
+tokcalc/
+├── src/
+│   ├── app/
+│   │   ├── api/
+│   │   │   ├── mcp/route.ts          # Public MCP endpoint (Streamable HTTP)
+│   │   │   ├── keys/route.ts         # Self-serve API key generation
+│   │   │   └── pricing/              # Live GPU pricing proxies
+│   │   │       ├── aws/route.ts
+│   │   │       ├── azure/route.ts
+│   │   │       ├── gcp/route.ts
+│   │   │       └── vast-ai/route.ts
+│   │   ├── compare/                  # SEO landing pages
+│   │   │   ├── h100-vs-h200/page.tsx
+│   │   │   └── gguf-q4-k-m-vs-q5-k-m/page.tsx
+│   │   ├── self-host-vs-openai-api/page.tsx
+│   │   ├── mcp/page.tsx              # MCP install docs + self-serve key form
+│   │   ├── page.tsx                  # Main calculator
+│   │   └── layout.tsx
+│   ├── lib/
+│   │   ├── mcp/
+│   │   │   ├── server.ts            # createMcpServer() factory (7 tools)
+│   │   │   └── auth.ts               # validateApiKey (Redis + env var)
+│   │   ├── token-calc.ts             # Core calculation engine
+│   │   ├── mlperf-curated.ts         # 9 MLPerf v4.1 reference configs
+│   │   ├── price-schema.ts           # PriceRecord type + helpers
+│   │   ├── benchmark-schema.ts       # BenchmarkRecord + CalibrationResult
+│   │   ├── engine-presets.ts         # 5 engine presets (vLLM/SGLang/TRT-LLM/llama.cpp/generic)
+│   │   └── url-state.ts              # URL hash + localStorage persistence
+│   └── components/
+│       ├── benchmark-import.tsx      # Paste JSON → calibrate against estimate
+│       └── confidence-badge.tsx      # 🟢🟡⚪ confidence dots
+├── mini-services/
+│   └── mcp-server/                   # Standalone npm package (for stdio + self-hosted HTTP)
+│       ├── server.ts                 # createMcpServer() factory (mirror of src/lib/mcp/server.ts)
+│       ├── auth.ts                   # Bearer auth middleware (Node http)
+│       ├── rate-limit.ts             # Upstash rate limiter (Node http)
+│       ├── http.ts                   # Standalone HTTP entry (tokcalc-mcp-http)
+│       ├── index.ts                  # Stdio entry (tokcalc-mcp-server)
+│       └── package.json              # @tokcalc/mcp-server npm package
+├── public/
+│   ├── sitemap.xml                   # 5 URLs (/, /mcp, 3 compare pages)
+│   ├── og.png                        # OG image
+│   └── manifest.json                 # PWA manifest
+├── server.json                       # MCP registry entry (packages + remotes)
+├── package.json                      # Web app deps
+└── next.config.ts
+```
 
 ## Acknowledgments
 
@@ -382,21 +501,25 @@ tokcalc builds on the work of:
 - **MLPerf / MLCommons** — standardized inference benchmark methodology
 - **Stanford HELM** — efficiency-aware model evaluation framework
 - **Anthropic / OpenAI / Google** — published prompt-caching pricing rules
+- **Model Context Protocol team** — MCP Streamable HTTP transport spec (2025-03-26)
 - **NVIDIA / AMD / Intel / Google / Groq / Cerebras** — published hardware specs
+- **Upstash** — Redis + rate limiting infrastructure
 
 Every formula has a citation. Every model/GPU/quant entry has a source URL
 where available. If you spot an unsourced claim, please open an issue.
 
 ## Star history
 
-[![Star History Chart](https://api.star-history.com/svg?repos=tokcalc/tokcalc&type=Date)](https://star-history.com/#tokcalc/tokcalc&Date)
+[![Star History Chart](https://api.star-history.com/svg?repos=stevecrates489-commits/tokcalc&type=Date)](https://star-history.com/#stevecrates489-commits/tokcalc&Date)
 
 ---
 
 <div align="center">
 
-**[Live demo](https://tokcalc.dev)** ·
-**[Documentation](https://tokcalc.dev/docs)** ·
+**[Live demo](https://tokcalc.vercel.app)** ·
+**[MCP install docs](https://tokcalc.vercel.app/mcp)** ·
+**[Public MCP endpoint](https://tokcalc.vercel.app/api/mcp)** ·
+**[npm package](https://www.npmjs.com/package/@tokcalc/mcp-server)** ·
 **[Contributing](CONTRIBUTING.md)** ·
 **[License](LICENSE)** ·
 **[Code of Conduct](CODE_OF_CONDUCT.md)**
@@ -404,3 +527,4 @@ where available. If you spot an unsourced claim, please open an issue.
 Made with care by the tokcalc community. Apache 2.0 licensed.
 
 </div>
+
