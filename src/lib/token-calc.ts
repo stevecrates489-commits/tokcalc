@@ -335,7 +335,7 @@ export interface CalcResult {
 
   // ---- Throughput ----
   decodeTokensPerSec: number;      // per-stream (batch=1)
-  aggregateTokensPerSec: number;   // batched (with continuous batching multiplier if enabled)
+  aggregateTokensPerSec: number;   // FLEET total — batched × continuous batching multiplier × numGpus (tensor-parallel)
   prefillTokensPerSec: number;     // prefill throughput
   batchCrossover: number;          // batch size where compute becomes bound
 
@@ -454,10 +454,13 @@ export function calculate(input: CalcInput): CalcResult {
     (quant.bytesPerParam * gpuFlops * 1000 * ETA_COMPUTE) /
     (2 * gpu.memBandwidthGbps * ETA_MEM * quantEff * (tp > 1 ? multiGpuEfficiency : 1));
 
-  // Aggregate tokens/sec — with continuous batching multiplier applied
+  // Aggregate tokens/sec — per-GPU with continuous batching, then scaled to fleet total.
+  // For tp>1, the fleet's combined throughput is the per-GPU aggregate × tp (tensor-parallel
+  // scales near-linearly for decode-bound workloads). This keeps cost/M output consistent:
+  // cost scales with tp, throughput scales with tp, cost/throughput stays correct.
   const memoryBoundAggregate = decodeTokensPerSec * input.batchSize * continuousBatchingMultiplier;
   const aggregateTokensPerSec = vramFits
-    ? Math.min(memoryBoundAggregate, computeCeiling)
+    ? Math.min(memoryBoundAggregate, computeCeiling) * tp
     : 0;
 
   // ---- Prompt caching ----

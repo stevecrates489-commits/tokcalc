@@ -103,6 +103,7 @@ const CompareGpusSchema = z.object({
   outputTokens: z.number().int().min(1).max(200000).default(200),
   sortBy: z.enum(["lowest_cost","highest_throughput","best_value"]).default("best_value"),
   limit: z.number().int().min(1).max(30).default(10),
+  gpus: z.array(z.string()).optional().describe("Restrict comparison to specific GPU IDs (e.g. ['h100-sxm','h200-sxm']). Use list_gpus first to find IDs."),
 });
 
 const RecommendTopologySchema = z.object({
@@ -220,7 +221,27 @@ function handleCompareGpus(input: z.infer<typeof CompareGpusSchema>) {
   const quant = QUANT_MAP[input.quantization as Quantization];
   if (!model || !quant) return { error: "Unknown model or quantization", models: Object.keys(MODEL_MAP).slice(0, 10) };
 
-  const candidates = GPUS.filter(g => g.vramGb * input.gpuCount >= model.activeParamsB * quant.bytesPerParam);
+  // Apply explicit GPU filter if provided, else all GPUs
+  let candidatePool = GPUS;
+  if (input.gpus && input.gpus.length > 0) {
+    const requested = new Set(input.gpus);
+    candidatePool = GPUS.filter(g => requested.has(g.id));
+    if (candidatePool.length === 0) {
+      return {
+        error: `No GPUs matched gpus=[${input.gpus.join(", ")}]. Call list_gpus to find valid IDs.`,
+        validGpuIds: GPUS.slice(0, 10).map(g => g.id),
+      };
+    }
+  }
+
+  // Filter: must have a known price AND meet memory requirement
+  const skippedNoPrice: string[] = [];
+  const candidates = candidatePool.filter(g => {
+    const fitsMemory = g.vramGb * input.gpuCount >= model.activeParamsB * quant.bytesPerParam;
+    const hasPrice = g.usdPerHour !== null && g.usdPerHour !== undefined && g.usdPerHour > 0;
+    if (!hasPrice) skippedNoPrice.push(g.id);
+    return fitsMemory && hasPrice;
+  });
 
   const results = candidates.map(g => {
     const r = calculate({
@@ -254,11 +275,12 @@ function handleCompareGpus(input: z.infer<typeof CompareGpusSchema>) {
   }).slice(0, input.limit);
 
   return {
-    summary: `Compared ${results.length} GPUs for ${model.name} (${quant.label}). Cheapest: ${sorted[0]?.gpuName} at $${sorted[0]?.costPerMillionTokens}/M tokens.`,
+    summary: `Compared ${results.length} GPUs for ${model.name} (${quant.label}). Cheapest: ${sorted[0]?.gpuName} at $${sorted[0]?.costPerMillionTokens.toLocaleString("en-US")}/M tokens.`,
     comparisons: sorted,
     totalCandidates: results.length,
     sortBy: input.sortBy,
-    assumptions: [`Region: us-east-1 (default)`, `On-demand pricing`, `Î·_mem = 0.65`, `Catalog version: 0.3.0`],
+    skippedNoPrice: skippedNoPrice.length > 0 ? skippedNoPrice : undefined,
+    assumptions: [`Region: us-east-1 (default)`, `On-demand pricing`, `η_mem = 0.65`, `Catalog version: 0.3.0`],
   };
 }
 
@@ -267,10 +289,14 @@ function handleRecommendTopology(input: z.infer<typeof RecommendTopologySchema>)
   const quant = QUANT_MAP[input.quantization as Quantization];
   if (!model || !quant) return { error: "Unknown model or quantization" };
 
+  // Per-request KV cache and per-request concurrency scale with batchSize,
+  // since all batchSize requests hold their KV simultaneously in a static batch.
+  // (For continuous batching the steady-state KV stays at ~1 request per slot;
+  // batchSize still represents the maximum concurrent batch to fit.)
+  const kvPerRequest = computeKVCacheGb(model, input.contextTokens, input.batchSize);
   const results = GPUS.map(g => {
     const rec = recommendTopology(model, g, input.contextTokens, input.batchSize, quant.bytesPerParam);
-    const maxConcurrent = computeMaxConcurrency(model, g, 1, input.contextTokens, quant.bytesPerParam);
-    const kvPerRequest = computeKVCacheGb(model, input.contextTokens, 1);
+    const maxConcurrent = computeMaxConcurrency(model, g, input.batchSize, input.contextTokens, quant.bytesPerParam);
     return {
       gpuId: g.id,
       gpuName: g.name,
@@ -285,12 +311,12 @@ function handleRecommendTopology(input: z.infer<typeof RecommendTopologySchema>)
   }).filter(r => r.fits).slice(0, 5);
 
   return {
-    summary: `For ${model.name} at ${fmtContext(input.contextTokens)} context: ${results.length} feasible topology options across ${GPUS.length} GPUs.`,
+    summary: `For ${model.name} at ${fmtContext(input.contextTokens)} context (batch=${input.batchSize}): ${results.length} feasible topology options across ${GPUS.length} GPUs.`,
     model: { name: model.name, paramsB: model.paramsB, activeParamsB: model.activeParamsB, isMoE: model.isMoE },
-    context: { tokens: input.contextTokens, label: fmtContext(input.contextTokens) },
+    context: { tokens: input.contextTokens, label: fmtContext(input.contextTokens), batchSize: input.batchSize },
     recommendations: results,
-    formula: `KV per request = 2 Ã— ${model.layers} layers Ã— ${model.kvHeads} KV heads Ã— ${model.headDim} head_dim Ã— 2 bytes Ã— ${input.contextTokens} tokens = ${computeKVCacheGb(model, input.contextTokens, 1).toFixed(2)} GB`,
-    assumptions: [`Single GPU unless TP needed`, `KV cache in FP16`, `Model weights + KV must fit in total VRAM`, `Catalog version: 0.3.0`],
+    formula: `KV per batch = 2 × ${model.layers} layers × ${model.kvHeads} KV heads × ${model.headDim} head_dim × 2 bytes × ${input.contextTokens} tokens × ${input.batchSize} batch = ${kvPerRequest.toFixed(2)} GB`,
+    assumptions: [`Single GPU unless TP needed`, `KV cache in FP16`, `Model weights + KV × batchSize must fit in total VRAM`, `Catalog version: 0.3.0`],
   };
 }
 
