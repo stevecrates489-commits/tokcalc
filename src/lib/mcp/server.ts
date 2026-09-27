@@ -306,23 +306,30 @@ function handleRecommendTopology(input: z.infer<typeof RecommendTopologySchema>)
   const quant = QUANT_MAP[input.quantization as Quantization];
   if (!model || !quant) return { error: "Unknown model or quantization" };
 
-  // Per-request KV cache and per-request concurrency scale with batchSize,
-  // since all batchSize requests hold their KV simultaneously in a static batch.
-  // (For continuous batching the steady-state KV stays at ~1 request per slot;
-  // batchSize still represents the maximum concurrent batch to fit.)
-  const kvPerRequest = computeKVCacheGb(model, input.contextTokens, input.batchSize);
+  // Per-batch KV cache. All batchSize requests hold KV simultaneously in a
+  // static batch, so the fit check must account for batchSize × kvPerRequest.
+  const kvPerRequest = computeKVCacheGb(model, input.contextTokens, 1);
+  const kvPerBatch = computeKVCacheGb(model, input.contextTokens, input.batchSize);
   const results = GPUS.map(g => {
     const rec = recommendTopology(model, g, input.contextTokens, input.batchSize, quant.bytesPerParam);
-    const maxConcurrent = computeMaxConcurrency(model, g, input.batchSize, input.contextTokens, quant.bytesPerParam);
+    // computeMaxConcurrency's 3rd arg is numGpus (GPU COUNT), not batchSize.
+    // Use the topology's actual GPU count so the number reconciles with fits.
+    const maxConcurrent = rec.neededGpus > 0
+      ? computeMaxConcurrency(model, g, rec.neededGpus, input.contextTokens, quant.bytesPerParam)
+      : 0;
     return {
       gpuId: g.id,
       gpuName: g.name,
       vramGb: g.vramGb,
       topology: rec.topology,
       neededGpus: rec.neededGpus,
+      totalVramGb: +(g.vramGb * rec.neededGpus).toFixed(0),
+      vramNeededGb: +(model.paramsB * quant.bytesPerParam + kvPerBatch).toFixed(1),
       fits: rec.fits,
       maxConcurrentUsers: maxConcurrent,
+      maxConcurrentBatchesAtContext: Math.floor(maxConcurrent / Math.max(input.batchSize, 1)),
       kvPerRequestGb: +kvPerRequest.toFixed(2),
+      kvPerBatchGb: +kvPerBatch.toFixed(2),
       reason: rec.reason,
     };
   }).filter(r => r.fits).slice(0, 5);
@@ -332,12 +339,14 @@ function handleRecommendTopology(input: z.infer<typeof RecommendTopologySchema>)
     model: { name: model.name, paramsB: model.paramsB, activeParamsB: model.activeParamsB, isMoE: model.isMoE },
     context: { tokens: input.contextTokens, label: fmtContext(input.contextTokens), batchSize: input.batchSize },
     recommendations: results,
-    formula: `KV per batch = 2 × ${model.layers} layers × ${model.kvHeads} KV heads × ${model.headDim} head_dim × 2 bytes × ${input.contextTokens} tokens × ${input.batchSize} batch = ${kvPerRequest.toFixed(2)} GB`,
-    assumptions: [`Single GPU unless TP needed`, `KV cache in FP16`, `Model weights + KV × batchSize must fit in total VRAM`, `Catalog version: 0.3.0`],
+    formula: `KV per request = 2 × ${model.layers} layers × ${model.kvHeads} KV heads × ${model.headDim} head_dim × 2 bytes × ${input.contextTokens} tokens = ${kvPerRequest.toFixed(2)} GB; × ${input.batchSize} batch = ${kvPerBatch.toFixed(2)} GB`,
+    assumptions: [`Single GPU unless TP needed`, `KV cache in FP16`, `Model weights + KV × batchSize must fit in total VRAM`, `maxConcurrentUsers is concurrent single-slot requests at this context; concurrent batches = maxConcurrentUsers ÷ ${input.batchSize}`, `Catalog version: 0.3.0`],
   };
 }
 
 function handleEstimateApiVsSelfHost(input: z.infer<typeof EstimateApiVsSelfHostSchema>) {
+  // `utilization` is a FRACTION in [0.05, 1] (0.5 = 50%), not a percentage.
+  const utilizationPct = input.utilization * 100;
   const sh = calculate({
     modelId: input.model,
     gpuId: input.gpu,
@@ -349,8 +358,18 @@ function handleEstimateApiVsSelfHost(input: z.infer<typeof EstimateApiVsSelfHost
   });
 
   const gpu = GPU_MAP[input.gpu];
+  const model = MODEL_MAP[input.model];
+  if (!sh.vramFits) {
+    return {
+      error: `Self-host infeasible: ${model?.name ?? input.model} at ${input.quantization} on ${input.gpuCount}× ${gpu?.name ?? input.gpu} needs ${sh.totalVramNeededGb.toFixed(1)} GB but only ${((gpu?.vramGb ?? 0) * input.gpuCount).toFixed(0)} GB is available.`,
+      suggestion: `Increase gpuCount, lower the quantization (e.g. fp8/int4), or pick a smaller model. Break-even is undefined until the config fits.`,
+      feasibility: { fits: false, vramNeededGb: +sh.totalVramNeededGb.toFixed(2), vramAvailableGb: +((gpu?.vramGb ?? 0) * input.gpuCount).toFixed(0) },
+    };
+  }
+
   const effGpuPrice = (gpu?.usdPerHour ?? 0) * input.gpuCount;
-  const effTokens = sh.aggregateTokensPerSec * (input.utilization / 100);
+  // utilization is already a fraction — do NOT divide by 100 again.
+  const effTokens = sh.aggregateTokensPerSec * input.utilization;
   const selfHostCostPerM = effTokens > 0 ? (effGpuPrice / 3600 / effTokens) * 1e6 : Infinity;
   const selfHostMonthly = effGpuPrice * 730;
 
@@ -373,8 +392,10 @@ function handleEstimateApiVsSelfHost(input: z.infer<typeof EstimateApiVsSelfHost
       costPerMillionTokens: +selfHostCostPerM.toFixed(2),
       monthlyInfraUsd: +selfHostMonthly.toFixed(2),
       monthlyTotalUsd: +selfHostMonthlyTotal.toFixed(2),
-      utilization: `${input.utilization}%`,
+      utilization: `${utilizationPct.toLocaleString("en-US")}%`,
+      utilizationNote: "Share of peak fleet throughput actually sold/utilized.",
       throughput: `${fmtTokens(sh.aggregateTokensPerSec)} tok/s`,
+      effectiveThroughput: `${fmtTokens(effTokens)} tok/s at ${utilizationPct.toLocaleString("en-US")}% utilization`,
     },
     api: {
       costPerMillionTokens: input.apiOutputPrice,
@@ -384,10 +405,11 @@ function handleEstimateApiVsSelfHost(input: z.infer<typeof EstimateApiVsSelfHost
     breakEven: {
       requestsPerDay: Math.round(breakEven),
       reached: meetsVolume,
-      explanation: `At ${input.utilization}% utilization with ${input.gpuCount}Ã— ${gpu?.name || input.gpu}, self-hosting breaks even at ${Math.round(breakEven).toLocaleString("en-US")} requests/day.`,
+      explanation: `At ${utilizationPct.toLocaleString("en-US")}% utilization with ${input.gpuCount}× ${gpu?.name || input.gpu}, self-hosting breaks even at ${Math.round(breakEven).toLocaleString("en-US")} requests/day.`,
+      requestsPerDayLabel: Math.round(breakEven).toLocaleString("en-US"),
     },
     assumptions: [
-      `Self-host throughput: ${fmtTokens(sh.aggregateTokensPerSec)} tok/s at ${input.utilization}% utilization`,
+      `Self-host peak throughput: ${fmtTokens(sh.aggregateTokensPerSec)} tok/s; effective at ${utilizationPct.toLocaleString("en-US")}% utilization = ${fmtTokens(effTokens)} tok/s`,
       `GPU price: $${effGpuPrice}/hr`,
       `API pricing: $${input.apiInputPrice}/M input, $${input.apiOutputPrice}/M output`,
       `730 hours/month`,
@@ -602,11 +624,19 @@ export function createMcpServer(): Server {
           };
       }
 
+      // Handlers signal recoverable problems (unknown ID, infeasible config,
+      // no GPU match) by returning an `error` key rather than throwing.
+      // Surface those as isError:true so agent clients can detect failure
+      // programmatically instead of parsing prose.
+      const isHandlerError =
+        !!result && typeof result === "object" && "error" in (result as Record<string, unknown>);
+
       return {
         content: [
           { type: "text", text: JSON.stringify(result, null, 2) },
         ],
-        structuredContent: result,
+        structuredContent: result as Record<string, unknown>,
+        ...(isHandlerError ? { isError: true } : {}),
       };
     } catch (error) {
       return {
