@@ -28,7 +28,6 @@ import {
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
-import { zodToJsonSchema } from "zod-to-json-schema";
 
 // Import tokcalc's calculation engine + catalog (shared with the web app)
 import {
@@ -52,24 +51,22 @@ import {
 // Import MLPerf curated reference configs (shared with the web app)
 import { MLPERF_CURATED } from "../../src/lib/mlperf-curated";
 
-// Helper function to format Zod schema for MCP protocol compliance (Strips $schema meta-tag & resolves refs)
+// Helper function to format Zod schema for MCP protocol compliance.
+// Uses Zod 4's native z.toJSONSchema() instead of zod-to-json-schema@3.x,
+// which can't parse Zod 4 ASTs and silently returns empty `{}` schemas.
 function formatInputSchema(schema: z.ZodTypeAny) {
-  // Cast to `any` because zod-to-json-schema@3.x expects ZodType<any, ZodTypeDef, any>
-  // but newer Zod exposes ZodTypeAny<unknown, unknown, ...>. Behavior is identical;
-  // this is purely a typing workaround.
-  const json = zodToJsonSchema(schema as any, {
-    target: "jsonSchema7",
-    $refStrategy: "none",
-  }) as Record<string, any>;
-
+  const json = z.toJSONSchema(schema) as Record<string, any>;
   delete json["$schema"];
-
-  return {
-    type: "object",
-    properties: json.properties || {},
-    required: json.required || [],
-    ...json,
-  };
+  // Strip defaults from required array — clients shouldn't be required to
+  // send fields that already have a default.
+  if (Array.isArray(json.required) && json.properties) {
+    json.required = json.required.filter((field: string) => {
+      const prop = json.properties[field];
+      return prop && prop.default === undefined;
+    });
+    if (json.required.length === 0) delete json.required;
+  }
+  return json;
 }
 
 // ============================================================
@@ -92,6 +89,8 @@ const EstimateCapacitySchema = z.object({
   continuousBatching: z.boolean().default(false),
   continuousBatchingMultiplier: z.number().min(1).max(10).default(1.5),
   reasoningTokens: z.number().int().min(0).max(1000000).default(0),
+  contextTokens: z.number().int().min(1).max(2000000).optional()
+    .describe("Full context length for KV cache computation (e.g., 8192 for RAG). If omitted, KV is computed for promptTokens only."),
 });
 
 const CompareGpusSchema = z.object({
@@ -150,6 +149,7 @@ const GetMlperfBenchmarksSchema = z.object({
 // ============================================================
 
 function handleEstimateCapacity(input: z.infer<typeof EstimateCapacitySchema>) {
+  // 1. Calculate baseline metrics using promptTokens (preserves correct prefill and TTFT)
   const result = calculate({
     modelId: input.model,
     gpuId: input.gpu,
@@ -164,6 +164,23 @@ function handleEstimateCapacity(input: z.infer<typeof EstimateCapacitySchema>) {
     continuousBatchingMultiplier: input.continuousBatchingMultiplier,
     reasoningTokens: input.reasoningTokens,
   });
+
+  // 2. Override KV cache and VRAM if explicit contextTokens provided.
+  // calculate() uses promptTokens for both prefill and KV — for RAG/long-context
+  // scenarios, callers know the full context length (prompt + retrieved docs).
+  // We selectively recompute KV and VRAM without touching prefill-derived TTFT.
+  if (input.contextTokens && input.contextTokens > input.promptTokens) {
+    const ctxModel = MODEL_MAP[input.model];
+    const ctxGpu = GPU_MAP[input.gpu];
+    if (ctxModel) {
+      const kvAtContext = computeKVCacheGb(ctxModel, input.contextTokens, input.batchSize);
+      const totalNeeded = result.modelSizeGb + kvAtContext;
+      const availableGb = (ctxGpu?.vramGb ?? 0) * input.gpuCount;
+      (result as any).kvCacheTotalGb = kvAtContext;
+      (result as any).totalVramNeededGb = totalNeeded;
+      (result as any).vramFits = totalNeeded <= availableGb;
+    }
+  }
 
   const model = MODEL_MAP[input.model];
   const gpu = GPU_MAP[input.gpu];
@@ -346,9 +363,9 @@ function handleEstimateApiVsSelfHost(input: z.infer<typeof EstimateApiVsSelfHost
 
   return {
     summary: cheaper && meetsVolume
-      ? `Self-hosting is cheaper at ${input.requestsPerDay.toLocaleString()} req/day. $${selfHostCostPerM.toFixed(2)}/M vs $${input.apiOutputPrice}/M API.`
+      ? `Self-hosting is cheaper at ${input.requestsPerDay.toLocaleString("en-US")} req/day. $${selfHostCostPerM.toFixed(2)}/M vs $${input.apiOutputPrice}/M API.`
       : !meetsVolume
-        ? `Not enough volume. Need ${Math.round(breakEven).toLocaleString()} req/day to break even (currently ${input.requestsPerDay.toLocaleString()}).`
+        ? `Not enough volume. Need ${Math.round(breakEven).toLocaleString("en-US")} req/day to break even (currently ${input.requestsPerDay.toLocaleString("en-US")}).`
         : `API is cheaper. Self-host $${selfHostCostPerM.toFixed(2)}/M vs API $${input.apiOutputPrice}/M.`,
     selfHost: {
       costPerMillionTokens: +selfHostCostPerM.toFixed(2),
@@ -365,7 +382,7 @@ function handleEstimateApiVsSelfHost(input: z.infer<typeof EstimateApiVsSelfHost
     breakEven: {
       requestsPerDay: Math.round(breakEven),
       reached: meetsVolume,
-      explanation: `At ${input.utilization}% utilization with ${input.gpuCount}× ${gpu?.name || input.gpu}, self-hosting breaks even at ${Math.round(breakEven).toLocaleString()} requests/day.`,
+      explanation: `At ${input.utilization}% utilization with ${input.gpuCount}× ${gpu?.name || input.gpu}, self-hosting breaks even at ${Math.round(breakEven).toLocaleString("en-US")} requests/day.`,
     },
     assumptions: [
       `Self-host throughput: ${fmtTokens(sh.aggregateTokensPerSec)} tok/s at ${input.utilization}% utilization`,
