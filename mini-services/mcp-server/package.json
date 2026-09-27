@@ -1,6 +1,6 @@
 ﻿{
   "name": "@tokcalc/mcp-server",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "mcpName": "io.github.stevecrates489-commits/tokcalc",
   "description": "tokcalc MCP server â€” open-source LLM serving capacity planner for AI agents. v0.2.1: stdio + stateless HTTP transport with bearer API key auth + KV-backed rate limiting + public hosted endpoint. 7 read-only tools: estimate_capacity, compare_gpus, recommend_topology, estimate_api_vs_self_host, list_models, list_gpus, get_mlperf_benchmarks.",
   "type": "module",

@@ -546,6 +546,36 @@ const TOOL_DEFINITIONS = [
   },
 ];
 
+/**
+ * Server build fingerprint.
+ *
+ * Bump this in lockstep with mini-services/mcp-server/package.json and expose
+ * it in serverInfo (tools/list) AND in every tool response's `provenance`.
+ *
+ * Why: when an agent reports behavior that does not match the code you just
+ * shipped, the only question that matters is "which build is this endpoint
+ * actually serving?". Stamping every response makes that answerable in a single
+ * call instead of five round-trips. It also caught serverInfo being hardcoded
+ * to 0.2.0 across three releases.
+ */
+export const SERVER_VERSION = "0.2.4";
+
+/** Stamped into every tool result so callers can detect stale deployments. */
+function withProvenance<T extends Record<string, unknown>>(result: T): T & {
+  provenance: { serverVersion: string; catalogVersion: string; buildStamp: string };
+} {
+  return {
+    ...result,
+    provenance: {
+      serverVersion: SERVER_VERSION,
+      catalogVersion: "0.3.0",
+      // Machine-greppable token: a single `grep fd5ba32` style diff tells you
+      // whether the running deployment includes a given fix.
+      buildStamp: `tokcalc-mcp/${SERVER_VERSION}`,
+    },
+  };
+}
+
 // ============================================================
 // SERVER FACTORY
 // ============================================================
@@ -563,11 +593,17 @@ const TOOL_DEFINITIONS = [
  */
 export function createMcpServer(): Server {
   const server = new Server(
-    { name: "tokcalc", version: "0.2.0" },
+    { name: "tokcalc", version: SERVER_VERSION },
     {
       capabilities: {
         tools: {},
       },
+      instructions:
+        `tokcalc MCP server ${SERVER_VERSION} — LLM serving capacity planner. ` +
+        `Use list_models / list_gpus to discover canonical IDs before calling ` +
+        `estimate_capacity, compare_gpus, recommend_topology, or ` +
+        `estimate_api_vs_self_host. All estimates are planning projections, not ` +
+        `deployment guarantees. Every response carries provenance.serverVersion.`,
     }
   );
 
@@ -631,17 +667,31 @@ export function createMcpServer(): Server {
       const isHandlerError =
         !!result && typeof result === "object" && "error" in (result as Record<string, unknown>);
 
+      // Stamp the running build into every response. One glance tells the
+      // caller whether the endpoint they're talking to includes a given fix.
+      const stamped = withProvenance(result as Record<string, unknown>);
+
       return {
         content: [
-          { type: "text", text: JSON.stringify(result, null, 2) },
+          { type: "text", text: JSON.stringify(stamped, null, 2) },
         ],
-        structuredContent: result as Record<string, unknown>,
+        structuredContent: stamped,
         ...(isHandlerError ? { isError: true } : {}),
       };
     } catch (error) {
       return {
         content: [
-          { type: "text", text: `Error: ${error instanceof Error ? error.message : String(error)}` },
+          {
+            type: "text",
+            text: JSON.stringify(
+              {
+                error: error instanceof Error ? error.message : String(error),
+                provenance: { serverVersion: SERVER_VERSION, buildStamp: `tokcalc-mcp/${SERVER_VERSION}` },
+              },
+              null,
+              2,
+            ),
+          },
         ],
         isError: true,
       };
