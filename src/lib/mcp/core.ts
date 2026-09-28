@@ -813,13 +813,20 @@ function handleFindConfigForSlo(input: z.infer<typeof FindConfigForSloSchema>) {
   const output = Math.max(1, Math.floor(input.contextTokens * 0.5));
   const tokensPerRequest = prefill + output;
 
+  // Mean-load throughput the workload actually needs: requests/day ×
+  // tokens/request spread over 24h. Drives the utilization figure per
+  // candidate and the best_value credit cap (right-sizing).
+  const requiredTps = (tokensPerRequest * input.requestsPerDay) / 86400;
+
   interface Cand {
     gpuId: string; gpuName: string; vendor: string; topology: string; gpuCount: number;
     vramGb: number; maxConcurrentUsers: number; aggregateTokensPerSecond: number;
-    ttftMs: number; costPerMillionTokens: number; estimatedMonthlyUsd: number;
+    ttftMs: number; costPerMillionTokens: number;
+    gpuHourlyUsd: number; dedicatedMonthlyUsd: number; estimatedMonthlyUsd: number;
+    meanLoadUtilizationPct: number; sustainsMeanLoad: boolean;
   }
   const candidates: Cand[] = [];
-  const rejectedBy = { ttft: 0, cost: 0, throughput: 0, noPrice: 0 };
+  const rejectedBy = { ttft: 0, cost: 0, throughput: 0, noPrice: 0, undersized: 0 };
 
   for (const g of GPUS) {
     for (const tp of [1, 2, 4, 8]) {
@@ -847,8 +854,14 @@ function handleFindConfigForSlo(input: z.infer<typeof FindConfigForSloSchema>) {
       if (input.maxCostPerMillion !== undefined && costPerM > input.maxCostPerMillion) { rejectedBy.cost++; continue; }
       if (input.minTokensPerSecond !== undefined && tps < input.minTokensPerSecond) { rejectedBy.throughput++; continue; }
 
-      const monthlyTokens = tokensPerRequest * input.requestsPerDay * 30;
-      const monthlyUsd = (costPerM / 1e6) * monthlyTokens;
+      // Dedicated-rig monthly cost: a serving deployment keeps the hardware
+      // up 24/7, so the honest figure is gpuCount × $/hr × 730h — the SAME
+      // basis as plan_deployment and estimate_api_vs_self_host. (The previous
+      // per-token accounting quoted ≈$233/mo for an 8×B200 rig that actually
+      // costs ≈$35,040/mo to keep running.) costPerMillionTokens remains as
+      // the MARGINAL per-token cost.
+      if (tps < requiredTps) rejectedBy.undersized++;
+      const dedicatedMonthlyUsd = Math.round((g.usdPerHour ?? 0) * tp * 730);
       candidates.push({
         gpuId: g.id,
         gpuName: g.name,
@@ -860,7 +873,11 @@ function handleFindConfigForSlo(input: z.infer<typeof FindConfigForSloSchema>) {
         aggregateTokensPerSecond: Math.round(tps),
         ttftMs: Math.round(ttft),
         costPerMillionTokens: +costPerM.toFixed(2),
-        estimatedMonthlyUsd: +monthlyUsd.toFixed(0),
+        gpuHourlyUsd: g.usdPerHour!,
+        dedicatedMonthlyUsd,
+        estimatedMonthlyUsd: dedicatedMonthlyUsd,
+        meanLoadUtilizationPct: +(requiredTps / tps * 100).toFixed(1),
+        sustainsMeanLoad: tps >= requiredTps,
       });
     }
   }
@@ -868,7 +885,7 @@ function handleFindConfigForSlo(input: z.infer<typeof FindConfigForSloSchema>) {
   if (candidates.length === 0) {
     return {
       error: `No feasible configuration for ${model.name} at ${fmtContext(input.contextTokens)} context (batch ${input.batchSize}) within the stated SLOs.`,
-      rejectedBy: { exceededMaxTtft: rejectedBy.ttft, exceededMaxCost: rejectedBy.cost, belowMinThroughput: rejectedBy.throughput },
+      rejectedBy: { exceededMaxTtft: rejectedBy.ttft, exceededMaxCost: rejectedBy.cost, belowMinThroughput: rejectedBy.throughput, undersizedForMeanLoad: rejectedBy.undersized },
       suggestion: "Relax a constraint (raise maxTtftMs / maxCostPerMillion, lower minTokensPerSecond), lower batchSize, or move to a lower-bit quantization (fp8/int4) to shrink the memory footprint.",
       sloChecked: {
         model: input.model, quantization: input.quantization, contextTokens: input.contextTokens,
@@ -879,17 +896,34 @@ function handleFindConfigForSlo(input: z.infer<typeof FindConfigForSloSchema>) {
     };
   }
 
+  // Ranking policy (documented in formulaNotes):
+  //   Tier 1: configs that sustain the mean load (capacity ≥ requests/day ×
+  //           tokens/request over 24h). Undersized rigs queue requests and
+  //           break the SLO, so they rank below — never above — sustaining ones.
+  //   Within a tier:
+  //     lowest_cost       → dedicated monthly $, ascending
+  //     highest_throughput→ aggregate tok/s, descending
+  //     best_value        → throughput per dedicated dollar, with credit capped
+  //                         at 2× the mean load: capacity beyond peak headroom
+  //                         adds cost, not score, so a 950-tok/s workload is no
+  //                         longer sold an 8-GPU rig.
+  const credit = (x: Cand) => Math.min(x.aggregateTokensPerSecond, requiredTps * 2);
+  const tierOf = (x: Cand) => (x.sustainsMeanLoad ? 0 : 1);
   candidates.sort((a, b) => {
-    if (input.sortBy === "lowest_cost") return a.estimatedMonthlyUsd - b.estimatedMonthlyUsd;
+    const t = tierOf(a) - tierOf(b);
+    if (t !== 0) return t;
+    if (input.sortBy === "lowest_cost") return a.dedicatedMonthlyUsd - b.dedicatedMonthlyUsd;
     if (input.sortBy === "highest_throughput") return b.aggregateTokensPerSecond - a.aggregateTokensPerSecond;
-    return (b.aggregateTokensPerSecond / Math.max(b.costPerMillionTokens, 0.001)) - (a.aggregateTokensPerSecond / Math.max(a.costPerMillionTokens, 0.001));
+    return credit(b) / b.dedicatedMonthlyUsd - credit(a) / a.dedicatedMonthlyUsd;
   });
 
   const best = candidates[0];
   return {
-    summary: `Found ${candidates.length} feasible config(s) for ${model.name} at ${fmtContext(input.contextTokens)} context (batch ${input.batchSize}). Recommended: ${best.topology} on ${best.gpuName} — ${best.aggregateTokensPerSecond.toLocaleString("en-US")} tok/s, ${fmtMs(best.ttftMs)} TTFT, $${best.costPerMillionTokens}/M, ≈$${best.estimatedMonthlyUsd.toLocaleString("en-US")}/mo at ${input.requestsPerDay.toLocaleString("en-US")} req/day.`,
+    summary: `Found ${candidates.length} feasible config(s) for ${model.name} at ${fmtContext(input.contextTokens)} context (batch ${input.batchSize}; mean load ${Math.round(requiredTps).toLocaleString("en-US")} tok/s). Recommended: ${best.topology} on ${best.gpuName} — ${best.aggregateTokensPerSecond.toLocaleString("en-US")} tok/s (${best.meanLoadUtilizationPct}% of mean load), ${fmtMs(best.ttftMs)} TTFT, $${best.costPerMillionTokens}/M marginal, $${best.dedicatedMonthlyUsd.toLocaleString("en-US")}/mo dedicated (730 h/mo).${best.sustainsMeanLoad ? "" : " WARNING: this rig cannot sustain the mean load — requests will queue."}`,
     recommended: best,
-    alternatives: candidates.slice(1, 6),
+    // Keep alternatives in the same sustaining tier as the recommendation —
+    // showing undersized rigs as peer options would undo the tiering above.
+    alternatives: candidates.slice(1).filter(c => !best.sustainsMeanLoad || c.sustainsMeanLoad).slice(0, 5),
     totalFeasible: candidates.length,
     sloChecked: {
       model: input.model, quantization: input.quantization, contextTokens: input.contextTokens,
@@ -898,14 +932,16 @@ function handleFindConfigForSlo(input: z.infer<typeof FindConfigForSloSchema>) {
       minTokensPerSecond: input.minTokensPerSecond ?? null,
     },
     workloadShape: {
-      note: "Deterministic stand-in workload: prefill = output = contextTokens ÷ 2 per request. Monthly cost scales linearly with requestsPerDay.",
+      note: "Deterministic stand-in workload: prefill = output = contextTokens ÷ 2 per request. Costs assume a DEDICATED rig rented 730 h/mo (same basis as plan_deployment), not per-token billing.",
       prefillTokens: prefill,
       outputTokens: output,
       tokensPerRequest,
+      requiredAggregateTokensPerSecond: +requiredTps.toFixed(1),
     },
     formulaNotes: [
       "Feasibility = (paramsB × bytes/param) + batchSize × KV(context) fits in vramGb × gpuCount.",
-      "Monthly = costPerMillion ÷ 1e6 × tokensPerRequest × requestsPerDay × 30.",
+      "Monthly = gpuCount × $/hr × 730 h (dedicated serving rig). costPerMillionTokens is the marginal per-token cost on top of that.",
+      "best_value credit-caps throughput at 2× the mean load, so oversized rigs don't win on paper efficiency; configs that cannot sustain the mean load rank below those that can.",
       "TTFT uses the core engine's compute-bound prefill model at the given TP degree.",
     ],
     assumptions: [`η_mem = 0.65`, `η_compute = 0.50`, `On-demand pricing, us-east-1 defaults`, `Catalog version: ${CATALOG_VERSION}`],

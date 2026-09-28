@@ -24,7 +24,7 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "bun:test";
 import { __test } from "../src/lib/mcp/core";
-import { computeKVCacheGb, MODEL_MAP } from "../src/lib/token-calc";
+import { computeKVCacheGb, MODEL_MAP, GPU_MAP } from "../src/lib/token-calc";
 
 const {
   EstimateCapacitySchema,
@@ -350,6 +350,47 @@ describe("new tool: find_config_for_slo", () => {
     expect(out.recommended.aggregateTokensPerSecond).toBeGreaterThan(0);
     expect(out.recommended.costPerMillionTokens).toBeGreaterThan(0);
     expect(out.totalFeasible).toBeGreaterThanOrEqual(1);
+  });
+
+  it("monthly cost is DEDICATED-rig basis: gpuCount × $/hr × 730 (not per-token)", () => {
+    const out: any = slo({
+      model: "llama3-8b", contextTokens: 8192, requestsPerDay: 10000, batchSize: 8,
+      sortBy: "highest_throughput",
+    } as any);
+    // highest_throughput recommends a big rig — verify its monthly figure
+    // equals the honest dedicated cost, not a per-token derivation.
+    const rec = out.recommended;
+    const unit = GPU_MAP[rec.gpuId].usdPerHour ?? 0;
+    expect(rec.dedicatedMonthlyUsd).toBe(Math.round(unit * rec.gpuCount * 730));
+    expect(rec.dedicatedMonthlyUsd).toBe(rec.estimatedMonthlyUsd);
+    // and it must exceed the rig's raw hourly × 730 sanity floor
+    expect(rec.dedicatedMonthlyUsd).toBeGreaterThan(rec.gpuCount * 100);
+  });
+
+  it("best_value right-sizes: a ~75 tok/s workload is not sold an 8-GPU rig", () => {
+    const out: any = slo({
+      model: "llama3-8b", contextTokens: 8192, requestsPerDay: 1000, batchSize: 8,
+      sortBy: "best_value",
+    } as any);
+    // mean load = 8192 × 1000 / 86400 ≈ 94.8 tok/s
+    expect(out.workloadShape.requiredAggregateTokensPerSecond).toBeGreaterThan(90);
+    expect(out.workloadShape.requiredAggregateTokensPerSecond).toBeLessThan(100);
+    const rec = out.recommended;
+    expect(rec.sustainsMeanLoad).toBe(true);
+    expect(rec.dedicatedMonthlyUsd).toBeLessThanOrEqual(600); // no multi-GPU B200 rig
+    expect(rec.meanLoadUtilizationPct).toBeLessThanOrEqual(100);
+  });
+
+  it("alternatives never include undersized configs when the recommendation sustains", () => {
+    const out: any = slo({
+      model: "llama3-8b", contextTokens: 8192, requestsPerDay: 50000, batchSize: 8,
+      sortBy: "best_value",
+    } as any);
+    if (out.recommended.sustainsMeanLoad) {
+      for (const alt of out.alternatives ?? []) {
+        expect(alt.sustainsMeanLoad).toBe(true);
+      }
+    }
   });
 
   it("respects a hard TTFT ceiling by excluding every config that violates it", () => {

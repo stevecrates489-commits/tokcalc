@@ -20054,7 +20054,7 @@ var MLPERF_CURATED = [
 ];
 
 // ../../src/lib/mcp-version.ts
-var MCP_SERVER_VERSION = "0.2.8";
+var MCP_SERVER_VERSION = "0.2.9";
 var CATALOG_VERSION = "0.3.0";
 
 // ../../src/lib/mcp-store.ts
@@ -20729,8 +20729,9 @@ function handleFindConfigForSlo(input) {
   const prefill = Math.max(1, Math.floor(input.contextTokens * 0.5));
   const output = Math.max(1, Math.floor(input.contextTokens * 0.5));
   const tokensPerRequest = prefill + output;
+  const requiredTps = tokensPerRequest * input.requestsPerDay / 86400;
   const candidates = [];
-  const rejectedBy = { ttft: 0, cost: 0, throughput: 0, noPrice: 0 };
+  const rejectedBy = { ttft: 0, cost: 0, throughput: 0, noPrice: 0, undersized: 0 };
   for (const g of GPUS) {
     for (const tp of [1, 2, 4, 8]) {
       if (g.usdPerHour == null || g.usdPerHour <= 0) {
@@ -20769,8 +20770,9 @@ function handleFindConfigForSlo(input) {
         rejectedBy.throughput++;
         continue;
       }
-      const monthlyTokens = tokensPerRequest * input.requestsPerDay * 30;
-      const monthlyUsd = costPerM / 1e6 * monthlyTokens;
+      if (tps < requiredTps)
+        rejectedBy.undersized++;
+      const dedicatedMonthlyUsd = Math.round((g.usdPerHour ?? 0) * tp * 730);
       candidates.push({
         gpuId: g.id,
         gpuName: g.name,
@@ -20782,14 +20784,18 @@ function handleFindConfigForSlo(input) {
         aggregateTokensPerSecond: Math.round(tps),
         ttftMs: Math.round(ttft),
         costPerMillionTokens: +costPerM.toFixed(2),
-        estimatedMonthlyUsd: +monthlyUsd.toFixed(0)
+        gpuHourlyUsd: g.usdPerHour,
+        dedicatedMonthlyUsd,
+        estimatedMonthlyUsd: dedicatedMonthlyUsd,
+        meanLoadUtilizationPct: +(requiredTps / tps * 100).toFixed(1),
+        sustainsMeanLoad: tps >= requiredTps
       });
     }
   }
   if (candidates.length === 0) {
     return {
       error: `No feasible configuration for ${model.name} at ${fmtContext(input.contextTokens)} context (batch ${input.batchSize}) within the stated SLOs.`,
-      rejectedBy: { exceededMaxTtft: rejectedBy.ttft, exceededMaxCost: rejectedBy.cost, belowMinThroughput: rejectedBy.throughput },
+      rejectedBy: { exceededMaxTtft: rejectedBy.ttft, exceededMaxCost: rejectedBy.cost, belowMinThroughput: rejectedBy.throughput, undersizedForMeanLoad: rejectedBy.undersized },
       suggestion: "Relax a constraint (raise maxTtftMs / maxCostPerMillion, lower minTokensPerSecond), lower batchSize, or move to a lower-bit quantization (fp8/int4) to shrink the memory footprint.",
       sloChecked: {
         model: input.model,
@@ -20803,18 +20809,23 @@ function handleFindConfigForSlo(input) {
       }
     };
   }
+  const credit = (x) => Math.min(x.aggregateTokensPerSecond, requiredTps * 2);
+  const tierOf = (x) => x.sustainsMeanLoad ? 0 : 1;
   candidates.sort((a, b) => {
+    const t = tierOf(a) - tierOf(b);
+    if (t !== 0)
+      return t;
     if (input.sortBy === "lowest_cost")
-      return a.estimatedMonthlyUsd - b.estimatedMonthlyUsd;
+      return a.dedicatedMonthlyUsd - b.dedicatedMonthlyUsd;
     if (input.sortBy === "highest_throughput")
       return b.aggregateTokensPerSecond - a.aggregateTokensPerSecond;
-    return b.aggregateTokensPerSecond / Math.max(b.costPerMillionTokens, 0.001) - a.aggregateTokensPerSecond / Math.max(a.costPerMillionTokens, 0.001);
+    return credit(b) / b.dedicatedMonthlyUsd - credit(a) / a.dedicatedMonthlyUsd;
   });
   const best = candidates[0];
   return {
-    summary: `Found ${candidates.length} feasible config(s) for ${model.name} at ${fmtContext(input.contextTokens)} context (batch ${input.batchSize}). Recommended: ${best.topology} on ${best.gpuName} — ${best.aggregateTokensPerSecond.toLocaleString("en-US")} tok/s, ${fmtMs(best.ttftMs)} TTFT, $${best.costPerMillionTokens}/M, ≈$${best.estimatedMonthlyUsd.toLocaleString("en-US")}/mo at ${input.requestsPerDay.toLocaleString("en-US")} req/day.`,
+    summary: `Found ${candidates.length} feasible config(s) for ${model.name} at ${fmtContext(input.contextTokens)} context (batch ${input.batchSize}; mean load ${Math.round(requiredTps).toLocaleString("en-US")} tok/s). Recommended: ${best.topology} on ${best.gpuName} — ${best.aggregateTokensPerSecond.toLocaleString("en-US")} tok/s (${best.meanLoadUtilizationPct}% of mean load), ${fmtMs(best.ttftMs)} TTFT, $${best.costPerMillionTokens}/M marginal, $${best.dedicatedMonthlyUsd.toLocaleString("en-US")}/mo dedicated (730 h/mo).${best.sustainsMeanLoad ? "" : " WARNING: this rig cannot sustain the mean load — requests will queue."}`,
     recommended: best,
-    alternatives: candidates.slice(1, 6),
+    alternatives: candidates.slice(1).filter((c) => !best.sustainsMeanLoad || c.sustainsMeanLoad).slice(0, 5),
     totalFeasible: candidates.length,
     sloChecked: {
       model: input.model,
@@ -20827,14 +20838,16 @@ function handleFindConfigForSlo(input) {
       minTokensPerSecond: input.minTokensPerSecond ?? null
     },
     workloadShape: {
-      note: "Deterministic stand-in workload: prefill = output = contextTokens ÷ 2 per request. Monthly cost scales linearly with requestsPerDay.",
+      note: "Deterministic stand-in workload: prefill = output = contextTokens ÷ 2 per request. Costs assume a DEDICATED rig rented 730 h/mo (same basis as plan_deployment), not per-token billing.",
       prefillTokens: prefill,
       outputTokens: output,
-      tokensPerRequest
+      tokensPerRequest,
+      requiredAggregateTokensPerSecond: +requiredTps.toFixed(1)
     },
     formulaNotes: [
       "Feasibility = (paramsB × bytes/param) + batchSize × KV(context) fits in vramGb × gpuCount.",
-      "Monthly = costPerMillion ÷ 1e6 × tokensPerRequest × requestsPerDay × 30.",
+      "Monthly = gpuCount × $/hr × 730 h (dedicated serving rig). costPerMillionTokens is the marginal per-token cost on top of that.",
+      "best_value credit-caps throughput at 2× the mean load, so oversized rigs don't win on paper efficiency; configs that cannot sustain the mean load rank below those that can.",
       "TTFT uses the core engine's compute-bound prefill model at the given TP degree."
     ],
     assumptions: [`η_mem = 0.65`, `η_compute = 0.50`, `On-demand pricing, us-east-1 defaults`, `Catalog version: ${CATALOG_VERSION}`]
