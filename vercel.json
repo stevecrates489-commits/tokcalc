@@ -2,7 +2,7 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "functions": {
     "src/app/api/pricing/aws/route.ts": {
-      "memory": 3008,
+      "memory": 1024,
       "maxDuration": 30
     },
     "src/app/api/pricing/gcp/route.ts": {
