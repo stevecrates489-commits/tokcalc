@@ -17,6 +17,10 @@ const TOOLS = [
   { name: "list_models", description: "Discover supported model IDs. Filter by family, category, MoE." },
   { name: "list_gpus", description: "Discover supported GPU IDs. Filter by vendor, category, min VRAM." },
   { name: "get_mlperf_benchmarks", description: "Curated MLPerf Inference v4.1 audited configs. Cross-validate estimates against reference systems." },
+  { name: "find_config_for_slo", description: "Inverse planner. Given model + context + traffic + SLO ceilings (TTFT, $/M, tok/s), searches every GPU × topology and returns feasible configs ranked by cost, throughput, or value." },
+  { name: "plan_deployment", description: "One-call decision brief: memory + KV headroom, performance, rig cost, blended build-vs-buy with break-even, concrete risks, and next steps." },
+  { name: "fetch_model_spec", description: "Fetches the model's real config.json from HuggingFace and diffs it against tokcalc's catalog (layers, KV heads, head_dim). Catches catalog drift before it skews KV math. 24h cache." },
+  { name: "record_measured", description: "Calibration loop. Record real tok/s / TTFT from your serving run; future estimates for that model+GPU+quantization are annotated with your measured/predicted ratio." },
 ];
 
 const EXAMPLE_PROMPTS = [
@@ -139,10 +143,10 @@ PORT=8080 tokcalc-mcp-http`;
         <div className="mb-8">
           <div className="flex items-center gap-3 mb-3">
             <h1 className="text-3xl sm:text-4xl font-bold tracking-tight">tokcalc MCP Server</h1>
-            <Badge className="bg-emerald-500/10 text-emerald-600 border-emerald-500/30 text-[10px]">v0.2.0</Badge>
+            <Badge className="bg-emerald-500/10 text-emerald-600 border-emerald-500/30 text-[10px]">v0.2.7</Badge>
           </div>
           <p className="text-muted-foreground text-sm sm:text-base leading-relaxed">
-            7 read-only planning tools for AI agents (Cursor, Claude Desktop, Cline). Ask your AI:
+            11 read-only planning tools for AI agents (Cursor, Claude Desktop, Cline). Ask your AI:
             &quot;How many H100s do I need for Llama 70B at 32K context?&quot; — get a transparent,
             formula-based answer with confidence intervals.
           </p>
@@ -153,7 +157,7 @@ PORT=8080 tokcalc-mcp-http`;
           <CardHeader>
             <CardTitle className="text-base flex items-center gap-2">
               <Box className="size-4 text-emerald-500" />
-              What you get — 7 read-only tools
+              What you get — 11 read-only tools
             </CardTitle>
             <CardDescription className="text-xs">
               All tools are read-only (no side effects, no mutations). Safe for production agent use.
@@ -325,7 +329,7 @@ PORT=8080 tokcalc-mcp-http`;
               </Button>
             </div>
             <p className="text-xs text-muted-foreground">
-              Restart your editor. The 7 tools will appear in your MCP tool list within seconds.
+              Restart your editor. The 11 tools will appear in your MCP tool list within seconds.
               No API key needed for stdio (local install).
             </p>
           </CardContent>
@@ -415,6 +419,13 @@ PORT=8080 tokcalc-mcp-http`;
               </div>
             </div>
             <div className="flex items-start gap-3">
+              <Badge className="bg-emerald-500/10 text-emerald-600 border-emerald-500/30 text-[9px] shrink-0">✓ shipped</Badge>
+              <div>
+                <div className="font-medium">v0.2.6 → v0.2.7 — 4 new tools + unified core</div>
+                <div className="text-muted-foreground">find_config_for_slo, plan_deployment, fetch_model_spec, record_measured (self-calibration); npm + hosted endpoint now share one tool core</div>
+              </div>
+            </div>
+            <div className="flex items-start gap-3">
               <Badge variant="outline" className="text-[9px] shrink-0">v0.3.0</Badge>
               <div>
                 <div className="font-medium">v0.3.0 — OAuth 2.1 with PKCE</div>
@@ -474,8 +485,8 @@ PORT=8080 tokcalc-mcp-http`;
               applicationCategory: "DeveloperApplication",
               operatingSystem: "Cross-platform (Node.js 18+)",
               offers: { "@type": "Offer", price: "0", priceCurrency: "USD" },
-              description: "Open-source MCP server for AI agents with 7 read-only LLM capacity planning tools. Supports stdio + HTTP + hosted endpoint at tokcalc.vercel.app/api/mcp.",
-              version: "0.2.0",
+              description: "Open-source MCP server for AI agents with 11 read-only LLM capacity planning tools. Supports stdio + HTTP + hosted endpoint at tokcalc.vercel.app/api/mcp.",
+              version: "0.2.7",
               license: "https://www.apache.org/licenses/LICENSE-2.0",
               url: "https://tokcalc.vercel.app/mcp",
               downloadUrl: "https://www.npmjs.com/package/@tokcalc/mcp-server",
