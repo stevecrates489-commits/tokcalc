@@ -242,6 +242,14 @@ describe("invariants", () => {
     expect(out.modelMaxContext).toBe(32768);
   });
 
+  it("estimate_capacity rejects promptTokens beyond maxContext (2M prompt on 8K model)", () => {
+    const out: any = handleEstimateCapacity(parseStrict(EstimateCapacitySchema, {
+      model: "llama3-8b", gpu: "h100-sxm", promptTokens: 2000000,
+    }) as any);
+    expect(out.error).toContain("promptTokens 2,000,000 exceeds");
+    expect(out.modelMaxContext).toBe(8192);
+  });
+
   it("recommend_topology rejects over-ceiling contexts too", () => {
     const out: any = handleRecommendTopology(parseStrict(RecommendTopologySchema, {
       model: "mixtral-8x7b", contextTokens: 65536,

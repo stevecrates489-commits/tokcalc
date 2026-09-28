@@ -324,6 +324,16 @@ function handleEstimateCapacity(input: z.infer<typeof EstimateCapacitySchema>) {
       };
     }
   }
+  // promptTokens is a context too — a 2M-token prompt on an 8K model is
+  // unservable regardless of VRAM. Guard it the same way as contextTokens.
+  if (model && input.promptTokens > model.maxContext) {
+    return {
+      error: `promptTokens ${input.promptTokens.toLocaleString("en-US")} exceeds ${model.name}'s maxContext of ${model.maxContext.toLocaleString("en-US")}.`,
+      modelMaxContext: model.maxContext,
+      requestedContext: input.promptTokens,
+      suggestion: `Split the input (retrieval, summarization, long-context model) — no serving configuration can run a single prompt past the model's trained window.`,
+    };
+  }
 
   // 3. Override KV cache and VRAM if explicit contextTokens provided.
   // calculate() uses promptTokens for both prefill and KV — for RAG/long-context
@@ -1179,7 +1189,10 @@ async function handleFetchModelSpec(input: z.infer<typeof FetchModelSpecSchema>)
       catalogVersion: CATALOG_VERSION,
     };
   } catch (err) {
-    if (cached) {
+    // Stale fallback is only safe when the cached entry is for the SAME repo.
+    // A 404 for repo X must not silently serve a spec cached from repo Y —
+    // that presents old data as the answer to a request that factually failed.
+    if (cached && cached.hfRepo === repo) {
       const ageHours = +((Date.now() - new Date(cached.fetchedAt).getTime()) / 3600000).toFixed(1);
       return {
         source: "cache-stale",

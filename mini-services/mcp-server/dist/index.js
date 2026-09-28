@@ -2027,7 +2027,7 @@ var require_fast_deep_equal = __commonJS(function(exports, module) {
   };
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/node_modules/json-schema-traverse/index.js
+// ../../node_modules/@modelcontextprotocol/sdk/node_modules/json-schema-traverse/index.js
 var require_json_schema_traverse = __commonJS(function(exports, module) {
   var traverse = module.exports = function(schema, opts, cb) {
     if (typeof opts == "function") {
@@ -8764,7 +8764,7 @@ var require_subschema2 = __commonJS(function(exports) {
   exports.extendSubschemaMode = extendSubschemaMode;
 });
 
-// ../../node_modules/ajv-formats/node_modules/ajv/node_modules/json-schema-traverse/index.js
+// ../../node_modules/ajv-formats/node_modules/json-schema-traverse/index.js
 var require_json_schema_traverse2 = __commonJS(function(exports, module) {
   var traverse = module.exports = function(schema, opts, cb) {
     if (typeof opts == "function") {
@@ -20054,7 +20054,7 @@ var MLPERF_CURATED = [
 ];
 
 // ../../src/lib/mcp-version.ts
-var MCP_SERVER_VERSION = "0.2.7";
+var MCP_SERVER_VERSION = "0.2.8";
 var CATALOG_VERSION = "0.3.0";
 
 // ../../src/lib/mcp-store.ts
@@ -20344,6 +20344,14 @@ function handleEstimateCapacity(input) {
         suggestion: `Clamp to the model's real ceiling. Advertising a larger window does not make it servable — KV cache grows linearly with context and would exhaust VRAM.`
       };
     }
+  }
+  if (model && input.promptTokens > model.maxContext) {
+    return {
+      error: `promptTokens ${input.promptTokens.toLocaleString("en-US")} exceeds ${model.name}'s maxContext of ${model.maxContext.toLocaleString("en-US")}.`,
+      modelMaxContext: model.maxContext,
+      requestedContext: input.promptTokens,
+      suggestion: `Split the input (retrieval, summarization, long-context model) — no serving configuration can run a single prompt past the model's trained window.`
+    };
   }
   if (input.contextTokens && input.contextTokens > input.promptTokens && model) {
     const kvAtContext = computeKVCacheGb(model, input.contextTokens, input.batchSize, kvBytesPerValue);
@@ -21088,7 +21096,7 @@ async function handleFetchModelSpec(input) {
       catalogVersion: CATALOG_VERSION
     };
   } catch (err) {
-    if (cached) {
+    if (cached && cached.hfRepo === repo) {
       const ageHours = +((Date.now() - new Date(cached.fetchedAt).getTime()) / 3600000).toFixed(1);
       return {
         source: "cache-stale",
