@@ -464,7 +464,10 @@ tokcalc/
 │   │   └── layout.tsx
 │   ├── lib/
 │   │   ├── mcp/
-│   │   │   ├── server.ts            # createMcpServer() factory (7 tools)
+│   │   │   ├── core.ts              # UNIFIED tool core — all 11 tools, both surfaces
+│   │   │   ├── server.ts            # thin shim → core (createMcpServer factory)
+│   │   │   ├── mcp-version.ts       # MCP_SERVER_VERSION — single source of truth
+│   │   │   ├── mcp-store.ts         # per-install store (spec cache + calibration)
 │   │   │   └── auth.ts               # validateApiKey (Redis + env var)
 │   │   ├── token-calc.ts             # Core calculation engine
 │   │   ├── mlperf-curated.ts         # 9 MLPerf v4.1 reference configs
@@ -477,7 +480,7 @@ tokcalc/
 │       └── confidence-badge.tsx      # 🟢🟡⚪ confidence dots
 ├── mini-services/
 │   └── mcp-server/                   # Standalone npm package (for stdio + self-hosted HTTP)
-│       ├── server.ts                 # createMcpServer() factory (mirror of src/lib/mcp/server.ts)
+│       ├── server.ts                 # thin shim → src/lib/mcp/core.ts (no duplicated handlers)
 │       ├── auth.ts                   # Bearer auth middleware (Node http)
 │       ├── rate-limit.ts             # Upstash rate limiter (Node http)
 │       ├── http.ts                   # Standalone HTTP entry (tokcalc-mcp-http)

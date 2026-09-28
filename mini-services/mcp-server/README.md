@@ -12,8 +12,13 @@ Open-source MCP (Model Context Protocol) server that lets AI agents (Cursor, Cla
 | `compare_gpus` | Ranked GPU comparison for one workload |
 | `recommend_topology` | TP/CP topology recommendation |
 | `estimate_api_vs_self_host` | Break-even analysis |
-| `list_models` | Discover supported model IDs (35 models) |
+| `list_models` | Discover supported model IDs (39 models) |
 | `list_gpus` | Discover supported GPU IDs (30 GPUs) |
+| `get_mlperf_benchmarks` | Curated MLPerf v4.1 reference configs |
+| `find_config_for_slo` | **Inverse planner** — SLOs + traffic → feasible configs ranked by cost/throughput/value |
+| `plan_deployment` | **One-call decision brief** — memory + perf + build-vs-buy + risks + next steps |
+| `fetch_model_spec` | Diff the catalog against live HuggingFace config.json (24h cache) |
+| `record_measured` | Store real tok/s measurements; future estimates self-calibrate |
 
 All tools are **read-only** — no side effects, no cloud credentials, no deployments.
 

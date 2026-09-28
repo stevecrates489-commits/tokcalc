@@ -41,6 +41,26 @@ if (process.env.SKIP_DIST_CHECK === "1") {
   process.exit(0);
 }
 
+// ---- 0. version sync between package.json and the runtime constant ---------
+// SERVER_VERSION was hardcoded in server.ts while package.json moved on
+// (0.2.5 shipped claiming 0.2.4 in every provenance fingerprint). Both now
+// live in src/lib/mcp-version.ts; this fails the publish if they drift.
+const versionSrc = fs.readFileSync(
+  path.join(pkgRoot, "..", "..", "src", "lib", "mcp-version.ts"),
+  "utf8",
+);
+const coreVersion = (versionSrc.match(/MCP_SERVER_VERSION\s*=\s*"([^"]+)"/) || [])[1];
+if (!coreVersion) {
+  fail("could not read MCP_SERVER_VERSION from src/lib/mcp-version.ts");
+}
+if (coreVersion !== pkg.version) {
+  fail(
+    `version drift: package.json says ${pkg.version} but src/lib/mcp-version.ts ` +
+      `says ${coreVersion}. Bump both in the same commit.`,
+  );
+}
+console.log(`[prepublish] version sync OK (${pkg.version}).`);
+
 // ---- 1. collect the artifacts npm will actually ship ----------------------
 const artifacts = new Set();
 for (const target of Object.values(pkg.bin || {})) artifacts.add(target);

@@ -144,7 +144,7 @@ export const GPUS: GpuSpec[] = [
 
   // === Apple Silicon (unified memory) ===
   // Refs: https://www.apple.com/newsroom/2023/06/apple-unveils-m2-ultra/
-  { id: "m2u-800",  name: "Mac M2 Ultra (800GB)", vendor: "Apple", category: "mac", memBandwidthGbps: 800, flopsTflops: 27.0, vramGb: 192, nvlinkGbps: 0, usdPerHour: 0.0, year: 2023, note: "Unified memory; purchased hardware, not rentable" },
+  { id: "m2u-800",  name: "Mac M2 Ultra (192GB unified)", vendor: "Apple", category: "mac", memBandwidthGbps: 800, flopsTflops: 27.0, vramGb: 192, nvlinkGbps: 0, usdPerHour: 0.0, year: 2023, note: "Unified memory; purchased hardware, not rentable. Legacy id 'm2u-800' refers to the 800 GB/s memory bandwidth, not VRAM." },
   { id: "m2u-192",  name: "Mac M2 Ultra (192GB)",  vendor: "Apple", category: "mac", memBandwidthGbps: 800, flopsTflops: 27.0, vramGb: 192, nvlinkGbps: 0, usdPerHour: 0.0, year: 2023, note: "Unified memory" },
   { id: "m3max-64", name: "Mac M3 Max (64GB)",    vendor: "Apple", category: "mac", memBandwidthGbps: 400, flopsTflops: 14.0, vramGb: 64,  nvlinkGbps: 0, usdPerHour: 0.0, year: 2023, note: "Unified memory" },
   { id: "m4max-128",name: "Mac M4 Max (128GB)",  vendor: "Apple", category: "mac", memBandwidthGbps: 546, flopsTflops: 17.0, vramGb: 128, nvlinkGbps: 0, usdPerHour: 0.0, year: 2024, note: "Unified memory" },
