@@ -327,7 +327,15 @@ export interface CalcInput {
 
 export interface CalcResult {
   // ---- Raw measurements ----
+  /** ALL params that must be resident in VRAM (paramsB × bytes). For MoE this
+   *  is the full expert set, not just the per-token active subset. */
   modelSizeGb: number;
+  /** ACTIVE params per token (activeParamsB × bytes). Equals modelSizeGb for
+   *  dense models; ~10x smaller for MoE. This is the working set the decode
+   *  memory-bandwidth math divides by. */
+  activeParamsGb: number;
+  /** True when the model is Mixture-of-Experts, i.e. modelSizeGb >> activeParamsGb. */
+  isMoE: boolean;
   kvCachePerTokenKb: number;
   kvCacheTotalGb: number;
   totalVramNeededGb: number;
@@ -402,8 +410,21 @@ export function calculate(input: CalcInput): CalcResult {
   if (!gpu) throw new Error(`Unknown GPU: ${input.gpuId}`);
 
   // ---- Model size ----
-  // For MoE, only active params are loaded per token; full params still occupy VRAM.
-  const modelSizeGb = (model.activeParamsB * quant.bytesPerParam);
+  // Two distinct quantities, easy to conflate:
+  //
+  //   activeParamsGb — ACTIVE params per token. For MoE only the routers pick
+  //     a subset of experts per token, so this is the working set the memory
+  //     bandwidth is divided by in the decode math below.
+  //
+  //   residentWeightsGb — ALL params that must sit in VRAM. MoE still needs
+  //     every expert resident even though only some are active per token, so
+  //     this is what actually consumes VRAM and what `modelSizeGb` reports.
+  //
+  // These are equal for dense models and diverge ~10x for MoE. Reporting the
+  // active figure as "model weights" made any consumer that divides by it
+  // (replica counts, headroom math) overestimate capacity by that factor.
+  const activeParamsGb = model.activeParamsB * quant.bytesPerParam;
+  const residentWeightsGb = model.paramsB * quant.bytesPerParam;
 
   // ---- Effective bandwidth / compute ----
   const quantEff = quant.efficiency;
@@ -437,12 +458,14 @@ export function calculate(input: CalcInput): CalcResult {
     (kvBytesPerToken * totalContextTokens * input.batchSize) / 1e9;
 
   // ---- Total VRAM ----
-  const fullWeightsGb = model.paramsB * quant.bytesPerParam;
-  const totalVramNeededGb = fullWeightsGb + kvCacheTotalGb;
+  const totalVramNeededGb = residentWeightsGb + kvCacheTotalGb;
   const vramFits = totalVramNeededGb <= gpu.vramGb * tp;
 
   // ---- Throughput ----
-  const decodeTokensPerSecRaw = effectiveBandwidthGbps / modelSizeGb * quantEff * speculativeBoost;
+  // Decode is memory-bandwidth bound on the ACTIVE working set (MoE only reads
+  // the experts its router selected for this token), so this divides by
+  // activeParamsGb, not residentWeightsGb.
+  const decodeTokensPerSecRaw = effectiveBandwidthGbps / activeParamsGb * quantEff * speculativeBoost;
   const decodeTokensPerSec = vramFits ? decodeTokensPerSecRaw : 0;
 
   // Prefill / compute-bound ceiling
@@ -529,7 +552,9 @@ export function calculate(input: CalcInput): CalcResult {
   }
 
   return {
-    modelSizeGb,
+    modelSizeGb: residentWeightsGb,
+    activeParamsGb,
+    isMoE: model.isMoE,
     kvCachePerTokenKb,
     kvCacheTotalGb,
     totalVramNeededGb,
@@ -679,8 +704,21 @@ export function computeKVCacheGb(
   return bytes / 1e9;
 }
 
-/** Maximum concurrent users that fit in VRAM at the given context length.
- *  = floor((total_vram - model_weights) / kv_per_request_at_context)
+/** Maximum concurrent single-slot requests that fit in VRAM at the given context length.
+ *
+ *  = floor((total_vram − resident_weights) / kv_per_request_at_context)
+ *
+ * Notes, stated explicitly so callers can reconcile the number by hand:
+ *  - `numGpus` is the GPU COUNT for the topology being priced (TP sharding
+ *    splits both weights and KV across the group, so total VRAM scales with it).
+ *  - `quantBytesPerParam` multiplies FULL `paramsB`, not `activeParamsB`: every
+ *    MoE expert must be resident even though only a subset is active per token.
+ *  - This counts single-slot requests. For a batch of size B, concurrent
+ *    batches = maxConcurrentUsers / B.
+ *  - No hidden reserve is applied — the result is exactly the floor of the
+ *    ratio above, so it can be reproduced by hand. It excludes runtime
+ *    overhead (activations, CUDA context, allocator slack), which real
+ *    deployments must budget for on top; treat it as an upper bound.
  */
 export function computeMaxConcurrency(
   model: ModelSpec,

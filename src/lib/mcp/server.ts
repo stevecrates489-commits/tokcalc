@@ -1,11 +1,11 @@
 ﻿/**
- * tokcalc MCP Server â€” server factory + tool registrations.
+ * tokcalc MCP Server — server factory + tool registrations.
  *
  * Defines the 7 read-only planning tools and a factory function
  * that wires them into a fresh Server instance.
  *
  * Used by both the stdio entry point (index.ts) and the HTTP
- * entry point (http.ts) â€” each creates its own server instance
+ * entry point (http.ts) — each creates its own server instance
  * via createMcpServer() to avoid shared transport state.
  *
  * Per v0.2.0 research (Perplexity brief, 2025-09-25):
@@ -13,13 +13,13 @@
  *    to stdio and multiple HTTP transports. Instead, use a factory."
  *
  * Tools:
- *   1. estimate_capacity â€” VRAM/KV/throughput/latency/cost for one config
- *   2. compare_gpus â€” ranked GPU comparison for one workload
- *   3. recommend_topology â€” TP/CP topology recommendation
- *   4. estimate_api_vs_self_host â€” break-even analysis
- *   5. list_models â€” discover supported model IDs
- *   6. list_gpus â€” discover supported GPU IDs
- *   7. get_mlperf_benchmarks â€” curated MLPerf v4.1 reference configs
+ *   1. estimate_capacity — VRAM/KV/throughput/latency/cost for one config
+ *   2. compare_gpus — ranked GPU comparison for one workload
+ *   3. recommend_topology — TP/CP topology recommendation
+ *   4. estimate_api_vs_self_host — break-even analysis
+ *   5. list_models — discover supported model IDs
+ *   6. list_gpus — discover supported GPU IDs
+ *   7. get_mlperf_benchmarks — curated MLPerf v4.1 reference configs
  */
 
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
@@ -89,9 +89,9 @@ const EstimateCapacitySchema = z.object({
   continuousBatching: z.boolean().default(false),
   continuousBatchingMultiplier: z.number().min(1).max(10).default(1.5),
   reasoningTokens: z.number().int().min(0).max(1000000).default(0),
-  contextTokens: z.number().int().min(1).max(2000000).optional()
-    .describe("Full context length for KV cache computation (e.g., 8192 for RAG). If omitted, KV is computed for promptTokens only."),
-});
+  contextTokens: z.number().int().min(1).max(10000000).optional()
+    .describe("Full context length for KV cache computation (e.g., 8192 for RAG). If omitted, KV is computed for promptTokens only. Must not exceed the model's maxContext — call list_models to check."),
+}).strict();
 
 const CompareGpusSchema = z.object({
   model: ModelIdSchema,
@@ -103,14 +103,15 @@ const CompareGpusSchema = z.object({
   sortBy: z.enum(["lowest_cost","highest_throughput","best_value"]).default("best_value"),
   limit: z.number().int().min(1).max(30).default(10),
   gpus: z.array(z.string()).optional().describe("Restrict comparison to specific GPU IDs (e.g. ['h100-sxm','h200-sxm']). Use list_gpus first to find IDs."),
-});
+}).strict();
 
 const RecommendTopologySchema = z.object({
   model: ModelIdSchema,
   quantization: QuantSchema.default("fp16"),
-  contextTokens: z.number().int().min(1024).max(2000000).default(8192),
+  contextTokens: z.number().int().min(1).max(10000000).default(8192)
+    .describe("Context length to size the KV cache for. Must not exceed the model's maxContext — call list_models to check."),
   batchSize: z.number().int().min(1).max(1000).default(1),
-});
+}).strict();
 
 const EstimateApiVsSelfHostSchema = z.object({
   model: ModelIdSchema,
@@ -124,25 +125,25 @@ const EstimateApiVsSelfHostSchema = z.object({
   apiModel: z.string().default("gpt-4o-mini"),
   apiInputPrice: z.number().min(0).default(0.15),
   apiOutputPrice: z.number().min(0).default(0.60),
-});
+}).strict();
 
 const ListModelsSchema = z.object({
   family: z.string().optional().describe("Filter by model family (e.g. 'Llama', 'Qwen')"),
   category: z.enum(["text","vlm","embedding","code","reasoning"]).optional(),
   isMoE: z.boolean().optional(),
-});
+}).strict();
 
 const ListGpusSchema = z.object({
   vendor: z.string().optional().describe("Filter by vendor (e.g. 'NVIDIA', 'AMD')"),
   category: z.enum(["datacenter","workstation","consumer","mac","tpu","lpu","wse","legacy"]).optional(),
   minVramGb: z.number().optional(),
-});
+}).strict();
 
 const GetMlperfBenchmarksSchema = z.object({
   gpuModel: z.string().optional().describe("Filter by GPU model substring (e.g. 'H100', 'H200', 'A100')"),
   workload: z.string().optional().describe("Filter by model ID substring (e.g. 'llama3-70b', 'llama3-8b')"),
   scenario: z.enum(["Offline", "Server"]).optional().describe("Filter by MLPerf scenario"),
-});
+}).strict();
 
 // ============================================================
 // TOOL HANDLERS
@@ -173,6 +174,14 @@ function handleEstimateCapacity(input: z.infer<typeof EstimateCapacitySchema>) {
     const ctxModel = MODEL_MAP[input.model];
     const ctxGpu = GPU_MAP[input.gpu];
     if (ctxModel) {
+      if (input.contextTokens > ctxModel.maxContext) {
+        return {
+          error: `contextTokens ${input.contextTokens.toLocaleString("en-US")} exceeds ${ctxModel.name}'s maxContext of ${ctxModel.maxContext.toLocaleString("en-US")}.`,
+          modelMaxContext: ctxModel.maxContext,
+          requestedContext: input.contextTokens,
+          suggestion: `Clamp to the model's real ceiling. Advertising a larger window does not make it servable — KV cache grows linearly with context and would exhaust VRAM.`,
+        };
+      }
       const kvAtContext = computeKVCacheGb(ctxModel, input.contextTokens, input.batchSize);
       const totalNeeded = result.modelSizeGb + kvAtContext;
       const availableGb = (ctxGpu?.vramGb ?? 0) * input.gpuCount;
@@ -206,6 +215,11 @@ function handleEstimateCapacity(input: z.infer<typeof EstimateCapacitySchema>) {
     },
     memory: {
       modelWeightsGb: +result.modelSizeGb.toFixed(2),
+      activeParamsGb: +(result as any).activeParamsGb?.toFixed?.(2) ?? null,
+      isMoE: (result as any).isMoE ?? model?.isMoE ?? false,
+      weightsNote: (result as any).isMoE ?? model?.isMoE
+        ? "MoE: modelWeightsGb is ALL experts resident in VRAM. activeParamsGb is the per-token working set used for the bandwidth math. They differ by ~10x — use modelWeightsGb for capacity, activeParamsGb for speed."
+        : "Dense model: modelWeightsGb equals activeParamsGb.",
       kvCacheGb: +result.kvCacheTotalGb.toFixed(2),
       totalRequiredGb: +result.totalVramNeededGb.toFixed(2),
       availableGb: gpu ? gpu.vramGb * input.gpuCount : 0,
@@ -222,11 +236,11 @@ function handleEstimateCapacity(input: z.infer<typeof EstimateCapacitySchema>) {
       memory: result.confidence.totalVramNeededGb,
     },
     assumptions: [
-      `Î·_mem = 0.65 (typical real-world memory utilization)`,
-      `Î·_compute = 0.50 (typical compute utilization)`,
+      `η_mem = 0.65 (typical real-world memory utilization)`,
+      `η_compute = 0.50 (typical compute utilization)`,
       `KV cache in FP16 (2 bytes per value)`,
       `Engine: ${input.engine} (affects efficiency factors)`,
-      `Continuous batching: ${input.continuousBatching ? `${input.continuousBatchingMultiplier}Ã— multiplier` : "disabled"}`,
+      `Continuous batching: ${input.continuousBatching ? `${input.continuousBatchingMultiplier}× multiplier` : "disabled"}`,
       `These are planning estimates, not deployment guarantees`,
     ],
     catalogVersion: "0.3.0",
@@ -291,11 +305,57 @@ function handleCompareGpus(input: z.infer<typeof CompareGpusSchema>) {
     return (b.aggregateTokensPerSecond / Math.max(b.costPerMillionTokens, 0.001)) - (a.aggregateTokensPerSecond / Math.max(a.costPerMillionTokens, 0.001));
   }).slice(0, input.limit);
 
+  // Describe the winner according to the requested ordering. The previous
+  // wording always said "Cheapest" while rows were ordered by sortBy, so a
+  // highest_throughput run opened with a sentence that contradicted its own
+  // table (e.g. "Cheapest: B200 at $0.64/M" when MI300X was cheaper at $0.40/M).
+  const best = sorted[0];
+  const cheapestByCost = results.length
+    ? results.reduce((acc, r) => (r.costPerMillionTokens < acc.costPerMillionTokens ? r : acc))
+    : undefined;
+  const fastest = results.length
+    ? results.reduce((acc, r) => (r.aggregateTokensPerSecond > acc.aggregateTokensPerSecond ? r : acc))
+    : undefined;
+  const bestValue = results.length
+    ? results.reduce((acc, r) => {
+        const score = (x: typeof r) =>
+          x.aggregateTokensPerSecond / Math.max(x.costPerMillionTokens, 0.001);
+        return score(r) > score(acc) ? r : acc;
+      })
+    : undefined;
+
+  const lead =
+    input.sortBy === "lowest_cost"
+      ? `Cheapest: ${cheapestByCost?.gpuName} at $${cheapestByCost?.costPerMillionTokens.toLocaleString("en-US")}/M tokens`
+      : input.sortBy === "highest_throughput"
+        ? `Fastest: ${fastest?.gpuName} at ${fastest?.aggregateTokensPerSecond.toLocaleString("en-US")} aggregate tok/s ($/${fastest?.costPerMillionTokens.toLocaleString("en-US")}/M)`
+        : `Best value: ${bestValue?.gpuName} — ${bestValue?.aggregateTokensPerSecond.toLocaleString("en-US")} tok/s at $${bestValue?.costPerMillionTokens.toLocaleString("en-US")}/M`;
+
   return {
-    summary: `Compared ${results.length} GPUs for ${model.name} (${quant.label}). Cheapest: ${sorted[0]?.gpuName} at $${sorted[0]?.costPerMillionTokens.toLocaleString("en-US")}/M tokens.`,
+    summary:
+      `Compared ${results.length} GPU${results.length === 1 ? "" : "s"} for ${model.name} (${quant.label}, ` +
+      `${input.gpuCount}× ${input.gpuCount > 1 ? "GPUs" : "GPU"}, batch ${input.batchSize}). ` +
+      `${lead}. Top ${input.sortBy === "lowest_cost" ? "cheapest" : input.sortBy === "highest_throughput" ? "fastest" : "value"} shown first.`,
     comparisons: sorted,
     totalCandidates: results.length,
     sortBy: input.sortBy,
+    leaders: {
+      cheapestByCost: cheapestByCost
+        ? { gpuId: cheapestByCost.gpuId, gpuName: cheapestByCost.gpuName, costPerMillionTokens: cheapestByCost.costPerMillionTokens }
+        : undefined,
+      fastest: fastest
+        ? { gpuId: fastest.gpuId, gpuName: fastest.gpuName, aggregateTokensPerSecond: fastest.aggregateTokensPerSecond }
+        : undefined,
+      bestValue: bestValue
+        ? { gpuId: bestValue.gpuId, gpuName: bestValue.gpuName, aggregateTokensPerSecond: bestValue.aggregateTokensPerSecond, costPerMillionTokens: bestValue.costPerMillionTokens }
+        : undefined,
+    },
+    firstRow: best && {
+      gpuId: best.gpuId,
+      gpuName: best.gpuName,
+      rankBasis: input.sortBy,
+      note: "First row reflects sortBy; it is only the cheapest when sortBy='lowest_cost'.",
+    },
     skippedNoPrice: skippedNoPrice.length > 0 ? skippedNoPrice : undefined,
     assumptions: [`Region: us-east-1 (default)`, `On-demand pricing`, `η_mem = 0.65`, `Catalog version: 0.3.0`],
   };
@@ -310,6 +370,7 @@ function handleRecommendTopology(input: z.infer<typeof RecommendTopologySchema>)
   // static batch, so the fit check must account for batchSize × kvPerRequest.
   const kvPerRequest = computeKVCacheGb(model, input.contextTokens, 1);
   const kvPerBatch = computeKVCacheGb(model, input.contextTokens, input.batchSize);
+  const residentWeightsGb = model.paramsB * quant.bytesPerParam;
   const results = GPUS.map(g => {
     const rec = recommendTopology(model, g, input.contextTokens, input.batchSize, quant.bytesPerParam);
     // computeMaxConcurrency's 3rd arg is numGpus (GPU COUNT), not batchSize.
@@ -317,6 +378,7 @@ function handleRecommendTopology(input: z.infer<typeof RecommendTopologySchema>)
     const maxConcurrent = rec.neededGpus > 0
       ? computeMaxConcurrency(model, g, rec.neededGpus, input.contextTokens, quant.bytesPerParam)
       : 0;
+    const freeGb = g.vramGb * rec.neededGpus - residentWeightsGb;
     return {
       gpuId: g.id,
       gpuName: g.name,
@@ -324,9 +386,16 @@ function handleRecommendTopology(input: z.infer<typeof RecommendTopologySchema>)
       topology: rec.topology,
       neededGpus: rec.neededGpus,
       totalVramGb: +(g.vramGb * rec.neededGpus).toFixed(0),
-      vramNeededGb: +(model.paramsB * quant.bytesPerParam + kvPerBatch).toFixed(1),
+      vramNeededGb: +(residentWeightsGb + kvPerBatch).toFixed(1),
+      residentWeightsGb: +residentWeightsGb.toFixed(1),
+      freeAfterWeightsGb: +freeGb.toFixed(1),
       fits: rec.fits,
       maxConcurrentUsers: maxConcurrent,
+      // The exact division behind maxConcurrentUsers, so the figure can be
+      // checked by hand instead of taken on faith. No hidden reserve is applied.
+      maxConcurrentUsersMath: kvPerRequest > 0
+        ? `floor((${g.vramGb} GB × ${rec.neededGpus} − ${residentWeightsGb.toFixed(1)} GB weights) ÷ ${kvPerRequest.toFixed(2)} GB/req) = ${maxConcurrent}`
+        : "n/a",
       maxConcurrentBatchesAtContext: Math.floor(maxConcurrent / Math.max(input.batchSize, 1)),
       kvPerRequestGb: +kvPerRequest.toFixed(2),
       kvPerBatchGb: +kvPerBatch.toFixed(2),
@@ -340,7 +409,14 @@ function handleRecommendTopology(input: z.infer<typeof RecommendTopologySchema>)
     context: { tokens: input.contextTokens, label: fmtContext(input.contextTokens), batchSize: input.batchSize },
     recommendations: results,
     formula: `KV per request = 2 × ${model.layers} layers × ${model.kvHeads} KV heads × ${model.headDim} head_dim × 2 bytes × ${input.contextTokens} tokens = ${kvPerRequest.toFixed(2)} GB; × ${input.batchSize} batch = ${kvPerBatch.toFixed(2)} GB`,
-    assumptions: [`Single GPU unless TP needed`, `KV cache in FP16`, `Model weights + KV × batchSize must fit in total VRAM`, `maxConcurrentUsers is concurrent single-slot requests at this context; concurrent batches = maxConcurrentUsers ÷ ${input.batchSize}`, `Catalog version: 0.3.0`],
+    assumptions: [
+      `Single GPU unless TP needed`,
+      `KV cache in FP16`,
+      `Model weights (${residentWeightsGb.toFixed(1)} GB, full paramsB${model.isMoE ? " — all MoE experts resident" : ""}) + KV × batchSize must fit in total VRAM`,
+      `maxConcurrentUsers is concurrent single-slot requests at this context; concurrent batches = maxConcurrentUsers ÷ ${input.batchSize}`,
+      `maxConcurrentUsers is an upper bound: it excludes runtime overhead (activations, CUDA context, allocator slack)`,
+      `Catalog version: 0.3.0`,
+    ],
   };
 }
 
@@ -379,17 +455,33 @@ function handleEstimateApiVsSelfHost(input: z.infer<typeof EstimateApiVsSelfHost
 
   const breakEven = apiCostPerRequest > 0 ? selfHostMonthly / (30 * apiCostPerRequest) : Infinity;
 
-  const cheaper = selfHostCostPerM < input.apiOutputPrice;
+  // Per-token comparisons must be like-for-like.
+  //
+  // `selfHostCostPerM` is a BLENDED figure: one $/M over all tokens the fleet
+  // emits. The API side has separate input and output rates, so the blended API
+  // cost is (inputTokens·in + outputTokens·out) / totalTokens per 1M — NOT
+  // apiOutputPrice alone. Comparing blended self-host against output-only API
+  // flattered self-hosting whenever input tokens are a large share of traffic.
+  const tokensPerRequest = input.inputTokens + input.outputTokens;
+  const apiBlendedCostPerM =
+    tokensPerRequest > 0
+      ? (apiCostPerRequest / tokensPerRequest) * 1e6
+      : input.apiOutputPrice;
+
+  const cheaper = selfHostCostPerM < apiBlendedCostPerM;
   const meetsVolume = input.requestsPerDay > breakEven;
 
   return {
     summary: cheaper && meetsVolume
-      ? `Self-hosting is cheaper at ${input.requestsPerDay.toLocaleString("en-US")} req/day. $${selfHostCostPerM.toFixed(2)}/M vs $${input.apiOutputPrice}/M API.`
+      ? `Self-hosting is cheaper at ${input.requestsPerDay.toLocaleString("en-US")} req/day. ` +
+        `$${selfHostCostPerM.toFixed(2)}/M blended (self-host) vs $${apiBlendedCostPerM.toFixed(2)}/M blended (${input.apiModel}).`
       : !meetsVolume
         ? `Not enough volume. Need ${Math.round(breakEven).toLocaleString("en-US")} req/day to break even (currently ${input.requestsPerDay.toLocaleString("en-US")}).`
-        : `API is cheaper. Self-host $${selfHostCostPerM.toFixed(2)}/M vs API $${input.apiOutputPrice}/M.`,
+        : `API is cheaper. $${selfHostCostPerM.toFixed(2)}/M blended (self-host) vs $${apiBlendedCostPerM.toFixed(2)}/M blended (${input.apiModel}).`,
     selfHost: {
+      costPerMillionTokensBlended: +selfHostCostPerM.toFixed(2),
       costPerMillionTokens: +selfHostCostPerM.toFixed(2),
+      blendedNote: "One rate across all emitted tokens (input + output).",
       monthlyInfraUsd: +selfHostMonthly.toFixed(2),
       monthlyTotalUsd: +selfHostMonthlyTotal.toFixed(2),
       utilization: `${utilizationPct.toLocaleString("en-US")}%`,
@@ -398,20 +490,32 @@ function handleEstimateApiVsSelfHost(input: z.infer<typeof EstimateApiVsSelfHost
       effectiveThroughput: `${fmtTokens(effTokens)} tok/s at ${utilizationPct.toLocaleString("en-US")}% utilization`,
     },
     api: {
-      costPerMillionTokens: input.apiOutputPrice,
+      costPerMillionTokensBlended: +apiBlendedCostPerM.toFixed(2),
+      costPerMillionInputTokens: input.apiInputPrice,
+      costPerMillionOutputTokens: input.apiOutputPrice,
+      costPerMillionTokens: +apiBlendedCostPerM.toFixed(2),
+      blendedNote:
+        "Blended = (inputTokens × in + outputTokens × out) ÷ total tokens, scaled to 1M. " +
+        "Compare against selfHost.costPerMillionTokensBlended, not the output-only rate.",
       monthlyUsd: +apiMonthly.toFixed(2),
       model: input.apiModel,
     },
     breakEven: {
       requestsPerDay: Math.round(breakEven),
       reached: meetsVolume,
-      explanation: `At ${utilizationPct.toLocaleString("en-US")}% utilization with ${input.gpuCount}× ${gpu?.name || input.gpu}, self-hosting breaks even at ${Math.round(breakEven).toLocaleString("en-US")} requests/day.`,
+      explanation:
+        `Self-host fixed cost $${selfHostMonthly.toFixed(2)}/mo ÷ ` +
+        `($${apiCostPerRequest.toFixed(5)}/request × 30 days) = ` +
+        `${Math.round(breakEven).toLocaleString("en-US")} req/day. ` +
+        `Assumes ${utilizationPct.toLocaleString("en-US")}% utilization on ${input.gpuCount}× ${gpu?.name || input.gpu}, ` +
+        `${input.inputTokens.toLocaleString("en-US")} input + ${input.outputTokens.toLocaleString("en-US")} output tokens per request.`,
       requestsPerDayLabel: Math.round(breakEven).toLocaleString("en-US"),
     },
     assumptions: [
       `Self-host peak throughput: ${fmtTokens(sh.aggregateTokensPerSec)} tok/s; effective at ${utilizationPct.toLocaleString("en-US")}% utilization = ${fmtTokens(effTokens)} tok/s`,
       `GPU price: $${effGpuPrice}/hr`,
-      `API pricing: $${input.apiInputPrice}/M input, $${input.apiOutputPrice}/M output`,
+      `API pricing: $${input.apiInputPrice}/M input, $${input.apiOutputPrice}/M output → $${apiBlendedCostPerM.toFixed(2)}/M blended at this token mix`,
+      `Break-even uses API cost only; it excludes self-host ops, power beyond the GPU-hour rate, and engineering time`,
       `730 hours/month`,
       `Catalog version: 0.3.0`,
     ],
@@ -576,6 +680,101 @@ function withProvenance<T extends Record<string, unknown>>(result: T): T & {
   };
 }
 
+/** The schema backing each tool, so we can echo valid names on a bad call. */
+const TOOL_SCHEMAS: Record<string, z.ZodType> = {
+  estimate_capacity: EstimateCapacitySchema,
+  compare_gpus: CompareGpusSchema,
+  recommend_topology: RecommendTopologySchema,
+  estimate_api_vs_self_host: EstimateApiVsSelfHostSchema,
+  list_models: ListModelsSchema,
+  list_gpus: ListGpusSchema,
+  get_mlperf_benchmarks: GetMlperfBenchmarksSchema,
+};
+
+/**
+ * Turn a thrown validation error into something a caller can act on.
+ *
+ * The important case is an unrecognized key. These schemas declare
+ * `additionalProperties: false` in their exported JSON Schema, but Zod's
+ * default object behaviour is to *strip* unknown keys silently — so a caller
+ * inventing a plausible name (`tokensPerMonth`, `apiInputPricePerMillion`)
+ * previously got a confident answer computed from defaults with their input
+ * quietly discarded. That is the worst possible failure mode: a number that
+ * looks authoritative and is wrong.
+ *
+ * With `.strict()` those calls now throw, and we answer with the exact list of
+ * accepted names plus a nearest-match suggestion, so the caller self-corrects
+ * in one turn.
+ */
+function describeCallFailure(
+  toolName: string,
+  error: unknown,
+): Record<string, unknown> {
+  const base: Record<string, unknown> = {
+    error: error instanceof Error ? error.message : String(error),
+    tool: toolName,
+    provenance: {
+      serverVersion: SERVER_VERSION,
+      buildStamp: `tokcalc-mcp/${SERVER_VERSION}`,
+    },
+  };
+
+  const issues =
+    error && typeof error === "object" && "issues" in error
+      ? ((error as { issues: unknown }).issues as Array<{ code?: string; path?: unknown[] }>)
+      : null;
+
+  if (!issues || issues.length === 0) return base;
+
+  const schema = TOOL_SCHEMAS[toolName];
+  const validKeys = schema
+    ? Object.keys((schema as unknown as { shape: Record<string, unknown> }).shape ?? {})
+    : [];
+
+  const unrecognized = issues.filter((i) => i.code === "unrecognized_keys");
+  const outOfRange = issues.filter((i) => i.code === "invalid_value");
+  const wrongType = issues.filter((i) => i.code === "invalid_type");
+
+  if (unrecognized.length > 0 && validKeys.length > 0) {
+    const bad = unrecognized.flatMap((i) => (Array.isArray(i.path) ? i.path : [])) as string[];
+
+    // Cheap nearest-name suggestion: prefix/substring overlap beats nothing.
+    const suggestions = bad.map((b) => {
+      const lower = b.toLowerCase();
+      const near = validKeys.find(
+        (k) =>
+          k.toLowerCase().includes(lower) ||
+          lower.includes(k.toLowerCase()) ||
+          k.toLowerCase().replace(/[^a-z]/g, "") === lower.replace(/[^a-z]/g, ""),
+      );
+      return near ? `${b} -> did you mean '${near}'?` : `${b} is not a parameter of ${toolName}`;
+    });
+
+    return {
+      ...base,
+      error: `Unrecognized parameter(s): ${bad.join(", ")}. These schemas are strict — unknown keys are rejected rather than ignored, so nothing was silently dropped.`,
+      unrecognizedParameters: bad,
+      suggestions,
+      validParameters: validKeys,
+      hint: `Call tools/list (or read the inputSchema) to see every accepted parameter and its default.`,
+    };
+  }
+
+  if (wrongType.length > 0 || outOfRange.length > 0) {
+    return {
+      ...base,
+      error: `Invalid value for ${toolName}.`,
+      invalidParameters: issues
+        .filter((i) => i.code === "invalid_type" || i.code === "invalid_value")
+        .map((i) => (Array.isArray(i.path) ? i.path.join(".") : "?")),
+      validParameters: validKeys,
+      hint: `Check the type and range constraints declared in the inputSchema for ${toolName}.`,
+    };
+  }
+
+  return base;
+}
+
 // ============================================================
 // SERVER FACTORY
 // ============================================================
@@ -584,8 +783,8 @@ function withProvenance<T extends Record<string, unknown>>(result: T): T & {
  * Create a fresh MCP Server instance with all 7 tools wired.
  *
  * Used by:
- *   - stdio entry point (index.ts) â€” one server per process
- *   - HTTP entry point (http.ts) â€” one server per request (stateless mode)
+ *   - stdio entry point (index.ts) — one server per process
+ *   - HTTP entry point (http.ts) — one server per request (stateless mode)
  *
  * Each caller creates its own instance via this factory to avoid
  * shared transport state (per v0.2.0 research recommendation #5:
@@ -684,15 +883,13 @@ export function createMcpServer(): Server {
           {
             type: "text",
             text: JSON.stringify(
-              {
-                error: error instanceof Error ? error.message : String(error),
-                provenance: { serverVersion: SERVER_VERSION, buildStamp: `tokcalc-mcp/${SERVER_VERSION}` },
-              },
+              describeCallFailure(name, error),
               null,
               2,
             ),
           },
         ],
+        structuredContent: describeCallFailure(name, error),
         isError: true,
       };
     }
