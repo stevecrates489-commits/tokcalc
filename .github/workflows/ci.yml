@@ -63,6 +63,9 @@ jobs:
     # Boots the Next.js site and runs tests/http-smoke.mjs against the real
     # /api/mcp route (auth guards, tool inventory, golden number over HTTP,
     # version stamp). Uses a dummy master key — CI has no Redis/Upstash.
+    # NOTE: the key must match the auth format gate (tokcalc_live_<32 hex>).
+    env:
+      CI_MCP_KEY: tokcalc_live_0123456789abcdef0123456789abcdef
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
@@ -81,7 +84,7 @@ jobs:
 
       - name: Start dev server
         run: |
-          MCP_API_KEY=ci-test-key npx next dev -p 3001 > dev.log 2>&1 &
+          MCP_API_KEY=$CI_MCP_KEY npx next dev -p 3001 > dev.log 2>&1 &
           for i in $(seq 1 60); do
             code=$(curl -s -o /dev/null -w "%{http_code}" \
               -X POST http://localhost:3001/api/mcp \
@@ -94,7 +97,7 @@ jobs:
 
       - name: HTTP smoke probe (20 checks)
         env:
-          MCP_API_KEY: ci-test-key
+          MCP_API_KEY: ${{ env.CI_MCP_KEY }}
         run: |
           EXPECTED_VERSION=$(grep -oP 'MCP_SERVER_VERSION = "\K[^"]+' src/lib/mcp-version.ts)
           EXPECTED_VERSION="$EXPECTED_VERSION" node tests/http-smoke.mjs http://localhost:3001
