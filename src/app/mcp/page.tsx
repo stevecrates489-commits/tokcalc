@@ -8,20 +8,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ArrowLeft, Terminal, Box, Sparkles, BookOpen, Zap, ExternalLink, Loader2, Check, Copy, AlertCircle } from "lucide-react";
 import Link from "next/link";
-
-const TOOLS = [
-  { name: "estimate_capacity", description: "VRAM/KV/throughput/latency for one config. Returns feasibility, performance ranges, cost, confidence." },
-  { name: "compare_gpus", description: "Ranked GPU comparison for one workload. Sort by lowest cost, highest throughput, or best value." },
-  { name: "recommend_topology", description: "TP/CP topology recommendation. Returns feasible GPU + topology designs for a context length." },
-  { name: "estimate_api_vs_self_host", description: "Break-even analysis. Compares monthly API costs vs self-hosted GPU infrastructure." },
-  { name: "list_models", description: "Discover supported model IDs. Filter by family, category, MoE." },
-  { name: "list_gpus", description: "Discover supported GPU IDs. Filter by vendor, category, min VRAM." },
-  { name: "get_mlperf_benchmarks", description: "Curated MLPerf Inference v4.1 audited configs. Cross-validate estimates against reference systems." },
-  { name: "find_config_for_slo", description: "Inverse planner. Given model + context + traffic + SLO ceilings (TTFT, $/M, tok/s), searches every GPU × topology and returns feasible configs ranked by cost, throughput, or value." },
-  { name: "plan_deployment", description: "One-call decision brief: memory + KV headroom, performance, rig cost, blended build-vs-buy with break-even, concrete risks, and next steps." },
-  { name: "fetch_model_spec", description: "Fetches the model's real config.json from HuggingFace and diffs it against tokcalc's catalog (layers, KV heads, head_dim). Catches catalog drift before it skews KV math. 24h cache." },
-  { name: "record_measured", description: "Calibration loop. Record real tok/s / TTFT from your serving run; future estimates for that model+GPU+quantization are annotated with your measured/predicted ratio." },
-];
+import { TOOL_CATALOG as TOOLS } from "@/lib/mcp/tool-catalog";
+import { MCP_SERVER_VERSION } from "@/lib/mcp-version";
 
 const EXAMPLE_PROMPTS = [
   "How many H100s do I need to serve Llama 3.3 70B at 32K context for 100 concurrent users?",
@@ -143,7 +131,7 @@ PORT=8080 tokcalc-mcp-http`;
         <div className="mb-8">
           <div className="flex items-center gap-3 mb-3">
             <h1 className="text-3xl sm:text-4xl font-bold tracking-tight">tokcalc MCP Server</h1>
-            <Badge className="bg-emerald-500/10 text-emerald-600 border-emerald-500/30 text-[10px]">v0.2.7</Badge>
+            <Badge className="bg-emerald-500/10 text-emerald-600 border-emerald-500/30 text-[10px]">v{MCP_SERVER_VERSION}</Badge>
           </div>
           <p className="text-muted-foreground text-sm sm:text-base leading-relaxed">
             11 read-only planning tools for AI agents (Cursor, Claude Desktop, Cline). Ask your AI:
@@ -423,6 +411,13 @@ PORT=8080 tokcalc-mcp-http`;
               <div>
                 <div className="font-medium">v0.2.6 → v0.2.7 — 4 new tools + unified core</div>
                 <div className="text-muted-foreground">find_config_for_slo, plan_deployment, fetch_model_spec, record_measured (self-calibration); npm + hosted endpoint now share one tool core</div>
+              </div>
+            </div>
+            <div className="flex items-start gap-3">
+              <Badge className="bg-emerald-500/10 text-emerald-600 border-emerald-500/30 text-[9px] shrink-0">✓ shipped</Badge>
+              <div>
+                <div className="font-medium">v0.2.8 → v0.2.9 — QA battery + SLO cost fix</div>
+                <div className="text-muted-foreground">35-check published-tarball battery; find_config_for_slo now quotes true dedicated-rig monthly cost with right-sizing tiers</div>
               </div>
             </div>
             <div className="flex items-start gap-3">

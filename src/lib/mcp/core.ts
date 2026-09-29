@@ -1430,6 +1430,18 @@ const TOOL_DEFINITIONS = [
   },
 ];
 
+/**
+ * Single source of truth for the tool *names + human descriptions* across
+ * every surface (npm tarball, hosted /api/mcp, /mcp docs page, README, tests).
+ *
+ * The /mcp docs page imports this list; tests/mcp-surface-parity.test.ts
+ * asserts the docs, the wire-format TOOL_DEFINITIONS, and the handler switch
+ * all agree. Adding a 12th tool means touching exactly: the schema, the
+ * handler, the switch case — and the parity test forces the docs to follow.
+ */
+export const TOOL_CATALOG: ReadonlyArray<{ name: string; description: string }> =
+  TOOL_DEFINITIONS.map((t) => ({ name: t.name, description: t.description }));
+
 /** The schema backing each tool, so we can echo valid names on a bad call. */
 const TOOL_SCHEMAS: Record<string, z.ZodType> = {
   estimate_capacity: EstimateCapacitySchema,
@@ -1703,4 +1715,5 @@ export const __test = {
   handlePlanDeployment,
   handleRecordMeasured,
   describeCallFailure,
+  TOOL_DEFINITIONS,
 };

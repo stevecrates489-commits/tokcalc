@@ -1,0 +1,100 @@
+name: CI
+
+# tokcalc continuous integration.
+# Runs on every push and PR to main:
+#   1. Install deps (root + mini-services/mcp-server) with bun
+#   2. Typecheck the whole repo (tsc --noEmit — must stay at zero errors)
+#   3. Build the MCP server dist + run the prepublish guard (freshness + version sync)
+#   4. Golden-number suite + surface-parity suite (bun test)
+#   5. 35-check stdio QA battery against the freshly built dist
+#
+# The golden suite is the contract: if a number changes, the change must be
+# justified and tests/mcp-golden.test.ts updated deliberately, not silently.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install root dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Install MCP server dependencies
+        working-directory: mini-services/mcp-server
+        run: bun install --frozen-lockfile
+
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      - name: Typecheck (zero errors allowed)
+        run: bunx tsc --noEmit
+
+      - name: Build MCP server dist
+        working-directory: mini-services/mcp-server
+        run: bun run build
+
+      - name: Prepublish guard (artifact freshness + version sync)
+        working-directory: mini-services/mcp-server
+        run: node scripts/prepublish-check.js
+
+      - name: Golden-number suite
+        run: bun test tests/mcp-golden.test.ts
+
+      - name: Surface-parity suite
+        run: bun test tests/mcp-surface-parity.test.ts
+
+      - name: Stdio QA battery (35 checks) against fresh dist
+        run: node tests/qa-live-probe.mjs local
+
+  http-smoke:
+    # Boots the Next.js site and runs tests/http-smoke.mjs against the real
+    # /api/mcp route (auth guards, tool inventory, golden number over HTTP,
+    # version stamp). Uses a dummy master key — CI has no Redis/Upstash.
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      - name: Start dev server
+        run: |
+          MCP_API_KEY=ci-test-key npx next dev -p 3001 > dev.log 2>&1 &
+          for i in $(seq 1 60); do
+            code=$(curl -s -o /dev/null -w "%{http_code}" \
+              -X POST http://localhost:3001/api/mcp \
+              -H "Content-Type: application/json" \
+              -H "MCP-Protocol-Version: 2025-03-26" \
+              -d "{}" || true)
+            if [ "$code" != "000" ]; then echo "endpoint up (HTTP $code)"; break; fi
+            sleep 2
+          done
+
+      - name: HTTP smoke probe (20 checks)
+        env:
+          MCP_API_KEY: ci-test-key
+        run: |
+          EXPECTED_VERSION=$(grep -oP 'MCP_SERVER_VERSION = "\K[^"]+' src/lib/mcp-version.ts)
+          EXPECTED_VERSION="$EXPECTED_VERSION" node tests/http-smoke.mjs http://localhost:3001

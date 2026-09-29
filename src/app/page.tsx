@@ -1443,8 +1443,9 @@ export default function Home() {
                               borderRadius: "6px",
                               fontSize: "11px",
                             }}
-                            formatter={(_v: number, _n: string, props: { payload: { maxConcurrent: number; prefillMs: number; kvGb: number; context: string } }) => {
+                            formatter={(_v: number, _n: string, props: { payload?: { maxConcurrent: number; prefillMs: number; kvGb: number; context: string } }) => {
                               const p = props.payload;
+                              if (!p) return ["", ""];
                               return [
                                 `${p.maxConcurrent.toLocaleString()} users · prefill ${fmtMs(p.prefillMs)} · KV ${fmtBytes(p.kvGb)}`,
                                 p.context,

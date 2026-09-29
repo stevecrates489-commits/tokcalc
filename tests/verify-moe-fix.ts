@@ -10,9 +10,16 @@
  * Qwen3-30B-A3B: paramsB 30.5, activeParamsB 3.3, fp8 (1 B/param)
  */
 
-import { calculate, MODELS, MODEL_MAP } from "../src/lib/token-calc.ts";
+import { calculate, MODELS, MODEL_MAP } from "../src/lib/token-calc";
 
-const cases = [
+const cases: Array<{
+  id: string;
+  gpu: string;
+  gpuCount: number;
+  quant: import("../src/lib/token-calc").Quantization;
+  ctx: number;
+  batch: number;
+}> = [
   { id: "mixtral-8x7b", gpu: "h100-sxm", gpuCount: 2, quant: "fp16", ctx: 8192, batch: 1 },
   { id: "qwen3-30b-a3b", gpu: "rtx-5090", gpuCount: 1, quant: "fp8", ctx: 8192, batch: 1 },
   { id: "llama3-70b", gpu: "h100-sxm", gpuCount: 2, quant: "fp8", ctx: 32768, batch: 8 },

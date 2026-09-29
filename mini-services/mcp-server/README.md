@@ -4,6 +4,11 @@
 
 Open-source MCP (Model Context Protocol) server that lets AI agents (Cursor, Claude Desktop, Cline) estimate LLM serving capacity — model fit, KV cache, throughput, latency, multi-GPU topology, and cost.
 
+> **Single-core architecture**: all 11 tools live in the website's `src/lib/mcp/core.ts`;
+> this package's `server.ts` is a thin re-export shim, so stdio and the hosted
+> endpoint can never drift apart. A surface-parity test suite and a 35-check
+> stdio QA battery + 20-check HTTP smoke probe guard every release.
+
 ## Tools
 
 | Tool | What it does |

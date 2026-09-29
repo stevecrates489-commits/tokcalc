@@ -53,6 +53,7 @@ local-*
 .z-ai-config
 *.log
 dev.log
+.smoke-dev.log
 dev.out.log
 test
 prompt

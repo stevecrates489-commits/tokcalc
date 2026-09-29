@@ -21289,6 +21289,7 @@ var TOOL_DEFINITIONS = [
     inputSchema: formatInputSchema(RecordMeasuredSchema)
   }
 ];
+var TOOL_CATALOG = TOOL_DEFINITIONS.map((t) => ({ name: t.name, description: t.description }));
 var TOOL_SCHEMAS = {
   estimate_capacity: EstimateCapacitySchema,
   compare_gpus: CompareGpusSchema,

@@ -133,7 +133,6 @@ export const metadata: Metadata = {
     images: [
       {
         url: "/og.png",
-        secure_url: "/og.png",
         width: 2400,
         height: 1260,
         alt: "tokcalc — Plan your LLM deployment before you rent the GPUs. Sample: Llama 3 70B · 2×H200 · FP8 · 128K context · 47 tok/s · 1.4s TTFT · $0.34/M tokens.",

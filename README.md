@@ -356,11 +356,11 @@ We welcome contributions! See [CONTRIBUTING.md](CONTRIBUTING.md) for:
 
 tokcalc ships an [MCP (Model Context Protocol)](https://modelcontextprotocol.io) server that lets AI agents (Cursor, Claude Desktop, Cline) call tokcalc during design reviews.
 
-**npm package**: [`@tokcalc/mcp-server`](https://www.npmjs.com/package/@tokcalc/mcp-server) (latest: v0.2.0)
+**npm package**: [`@tokcalc/mcp-server`](https://www.npmjs.com/package/@tokcalc/mcp-server) (latest: v0.2.9)
 **Public endpoint**: `https://tokcalc.vercel.app/api/mcp` (Streamable HTTP, bearer auth, rate-limited)
 **Install docs**: `https://tokcalc.vercel.app/mcp`
 
-### 7 read-only tools
+### 11 read-only tools
 
 | Tool | What it does |
 |---|---|
@@ -371,6 +371,10 @@ tokcalc ships an [MCP (Model Context Protocol)](https://modelcontextprotocol.io)
 | `list_models` | Discover supported model IDs |
 | `list_gpus` | Discover supported GPU IDs |
 | `get_mlperf_benchmarks` | Curated MLPerf Inference v4.1 audited reference configs |
+| `find_config_for_slo` | **Inverse planner** — SLOs + traffic → feasible configs ranked by cost/throughput/value |
+| `plan_deployment` | **One-call decision brief** — memory + perf + build-vs-buy + risks + next steps |
+| `fetch_model_spec` | Diff the catalog against live HuggingFace config.json (24h cache) |
+| `record_measured` | Store real tok/s measurements; future estimates self-calibrate |
 
 All tools are **read-only** — no side effects, no cloud credentials, no deployments.
 
@@ -425,6 +429,34 @@ Set `MCP_API_KEY`, `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN` env vars
 > "I need to serve Llama 3.3 70B at 32K context for 50 concurrent users. What GPU topology do you recommend, and how much will it cost per month?"
 
 The agent calls `list_models` → `list_gpus` → `recommend_topology` → `estimate_capacity` → returns a structured plan with VRAM, throughput, latency, cost, and confidence.
+
+## Development & testing
+
+```bash
+# Typecheck (must stay at zero errors)
+bunx tsc --noEmit
+
+# Golden-number suite (33 tests) — hand-verified oracle values
+bun test tests/mcp-golden.test.ts
+
+# Surface-parity suite (9 tests) — every surface advertises the same 11 tools
+bun test tests/mcp-surface-parity.test.ts
+
+# Build the npm server dist + prepublish guard (freshness + version sync)
+cd mini-services/mcp-server && bun run build && node scripts/prepublish-check.js
+
+# 35-check black-box stdio QA battery against the freshly built dist
+cd ../.. && node tests/qa-live-probe.mjs local
+# …or against the PUBLISHED npm tarball:
+node tests/qa-live-probe.mjs 0.2.9
+
+# 20-check HTTP smoke probe against the hosted /api/mcp surface
+MCP_API_KEY=<key> EXPECTED_VERSION=0.2.9 node tests/http-smoke.mjs http://localhost:3001
+# …or against production:
+MCP_API_KEY=<key> node tests/http-smoke.mjs https://tokcalc.vercel.app
+```
+
+GitHub Actions runs all of the above (except the published-tarball mode) on every push — see `.github/workflows/ci.yml`.
 
 ## Tech stack
 
