@@ -24,4 +24,4 @@ await createMcpServer().connect(transport);
 
 // IMPORTANT: log to stderr only — stdout is reserved for JSON-RPC framing
 // (per v0.2.0 research, common mistake #14: "Writing logs to stdout in stdio mode")
-console.error("tokcalc MCP server started (stdio transport) — 7 tools available");
+console.error("tokcalc MCP server started (stdio transport) — 11 tools available");

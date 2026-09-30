@@ -3,6 +3,34 @@
 All notable changes to tokcalc (website + `@tokcalc/mcp-server`) are documented here.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.3.0] — 2026-09
+
+### Added
+
+- **`tokcalc plan` CLI** (`npx @tokcalc/mcp-server plan`) — a non-interactive
+  capacity planner for CI and bots that cannot speak MCP. Reads `.tokcalc.json`
+  or flags, emits Markdown (default) or JSON. Exit code is `0` when the plan
+  fits, `2` when it does not, `1` on usage error, so it can gate a build
+  directly. It calls the same `src/lib/token-calc.ts` the site and MCP tools
+  use, rather than reimplementing the math.
+- **GitHub Action** (root `action.yml`) — comments a capacity + cost plan on
+  every pull request that touches the plan, so reviewers can sanity-check the
+  model/GPU/context choice without leaving the diff. Runs tokcalc's own
+  TypeScript sources via `setup-node`, so it cannot drift from the calculator.
+  Opt into a hard failure with `fail-on-infeasible: true`.
+- **MCP Registry publication** — `server.json` is now published to the official
+  registry by `.github/workflows/publish-mcp.yml` on every `v*` tag, using
+  GitHub OIDC (no stored PAT). The workflow refuses to publish when the tag,
+  `MCP_SERVER_VERSION`, and `server.json` disagree. The registry listing had
+  been pinned at `0.2.0` while npm was at `0.2.9`, so registry installs were
+  serving a build from before the single-core refactor.
+
+### Fixed
+
+- Catalog counts in the docs said 35 models / 30 GPUs; the catalog actually
+  holds 39 / 31.
+- stdio entry logged "7 tools available"; there have been 11 since 0.2.7.
+
 ## [0.2.9] — 2026-09
 
 ### Fixed

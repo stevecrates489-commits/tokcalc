@@ -1,0 +1,10 @@
+{
+  "model": "llama3-70b",
+  "gpu": "h100-sxm",
+  "quantization": "fp8",
+  "numGpus": 2,
+  "contextTokens": 32768,
+  "concurrency": 16,
+  "promptTokens": 2048,
+  "outputTokens": 512
+}

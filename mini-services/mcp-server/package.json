@@ -1,6 +1,6 @@
 {
   "name": "@tokcalc/mcp-server",
-  "version": "0.2.9",
+  "version": "0.3.0",
   "mcpName": "io.github.stevecrates489-commits/tokcalc",
   "description": "tokcalc MCP server — open-source LLM serving capacity planner for AI agents. stdio + stateless HTTP transport with bearer API key auth + KV-backed rate limiting + public hosted endpoint. 11 read-only tools: estimate_capacity, compare_gpus, recommend_topology, estimate_api_vs_self_host, list_models, list_gpus, get_mlperf_benchmarks, find_config_for_slo, plan_deployment, fetch_model_spec, record_measured.",
   "type": "module",
@@ -11,7 +11,8 @@
     "tokcalc-mcp": "dist/index.js",
     "tokcalc-mcp-server": "dist/index.js",
     "mcp-server": "dist/index.js",
-    "tokcalc-mcp-http": "dist/http.js"
+    "tokcalc-mcp-http": "dist/http.js",
+    "tokcalc-plan": "dist/cli.js"
   },
   "files": [
     "dist/",
@@ -50,10 +51,14 @@
       "types": "./dist/server.d.ts",
       "import": "./dist/server.js"
     },
+    "./plan": {
+      "types": "./dist/cli.d.ts",
+      "import": "./dist/cli.js"
+    },
     "./package.json": "./package.json"
   },
   "scripts": {
-    "build": "bun build ./index.ts ./server.ts ./http.ts --outdir ./dist --target node",
+    "build": "bun build ./index.ts ./server.ts ./http.ts ./cli.ts --outdir ./dist --target node",
     "prepublishOnly": "node scripts/prepublish-check.js",
     "verify:dist": "node scripts/prepublish-check.js"
   },

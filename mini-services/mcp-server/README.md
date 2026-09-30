@@ -65,6 +65,35 @@ Add to `.cursor/mcp.json` in your project:
 
 Add the same config to Cline's MCP settings.
 
+## CLI — `tokcalc plan`
+
+Not everything that wants a capacity number speaks MCP. CI jobs, bots, and the
+[GitHub Action](https://github.com/stevecrates489-commits/tokcalc) call the same
+calculator directly through `tokcalc plan`.
+
+```bash
+# From a .tokcalc.json in the current directory
+npx @tokcalc/mcp-server plan
+
+# Or straight from flags
+npx @tokcalc/mcp-server plan \
+  --model llama3-70b --gpu h100-sxm --quant fp8 \
+  --gpus 2 --context 32768 --concurrency 16
+
+# Machine-readable
+npx @tokcalc/mcp-server plan --format json
+```
+
+Flags override the config file. Run `npx @tokcalc/mcp-server plan --help` for
+the full list, or `models` / `gpus` / `quants` to list valid ids.
+
+**Exit codes** — `0` the plan fits in VRAM, `2` it does not, `1` usage error.
+That makes it usable directly as a CI gate:
+
+```bash
+npx @tokcalc/mcp-server plan --config .tokcalc.json || exit 1
+```
+
 ## Example prompts
 
 Ask your AI agent:
@@ -77,11 +106,11 @@ Ask your AI agent:
 
 The agent calls `list_models` → `list_gpus` → `recommend_topology` → `estimate_capacity` and returns a structured plan with throughput ranges, latency, VRAM, cost, and confidence levels.
 
-## Supported models (35)
+## Supported models (39)
 
 Llama 3/3.1/3.3, Llama 4 Scout/Maverick, Mistral 7B, Mixtral 8x7B/8x22B, Mistral Large 3, Pixtral 12B, Codestral, Qwen 2/2.5/3 (incl. MoE + VL), DeepSeek V3/R1/Coder V2, Gemma 2, Phi-3/4, SmolLM2, Falcon 3, OLMo 2, BGE-M3, E5, GTE.
 
-## Supported GPUs (30)
+## Supported GPUs (31)
 
 NVIDIA H100/H200/B200/B300, A100, L40S, L4, T4, V100, RTX 4090/3090/5090, RTX PRO 6000 Blackwell, AMD MI300X/MI325X, Intel Gaudi 3, Google TPU v5p/Trillium, Groq LPU, Cerebras CS-3, Apple M2/M3/M4 Ultra/Max.
 

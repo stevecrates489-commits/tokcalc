@@ -1,0 +1,194 @@
+name: "tokcalc plan"
+description: "Comment an LLM serving capacity + cost plan on your pull request"
+author: "tokcalc"
+
+branding:
+  icon: "server"
+  color: "blue"
+
+# Puts tokcalc's capacity plan directly on a PR, so a reviewer can sanity-check
+# the model/GPU/context choice without leaving the diff.
+#
+# It runs the same src/lib/token-calc.ts the website and the MCP tools run on,
+# read straight out of this repository. That means the action cannot drift from
+# the calculator's numbers — there is no second implementation to fall out of
+# sync, and no published package to keep version-matched.
+#
+# Add a .tokcalc.json to the repo root:
+#
+#   {
+#     "model": "llama3-70b",
+#     "gpu": "h100-sxm",
+#     "quantization": "fp8",
+#     "numGpus": 2,
+#     "contextTokens": 32768,
+#     "concurrency": 16
+#   }
+
+inputs:
+  config:
+    description: "Path to the JSON plan config"
+    required: false
+    default: ".tokcalc.json"
+  model:
+    description: "Model id — overrides the config file"
+    required: false
+  gpu:
+    description: "GPU id — overrides the config file"
+    required: false
+  quant:
+    description: "Quantization, e.g. fp8 / bf16 / int4 — overrides the config file"
+    required: false
+  gpus:
+    description: "Tensor-parallel degree — overrides the config file"
+    required: false
+  context:
+    description: "Context length per request, in tokens — overrides the config file"
+    required: false
+  concurrency:
+    description: "Concurrent requests — overrides the config file"
+    required: false
+  prompt:
+    description: "Prompt tokens per request — overrides the config file"
+    required: false
+  output:
+    description: "Generated tokens per request — overrides the config file"
+    required: false
+  comment:
+    description: "Post the plan as a PR comment"
+    required: false
+    default: "true"
+  fail-on-infeasible:
+    description: "Fail the check when the configuration does not fit in VRAM"
+    required: false
+    default: "false"
+
+outputs:
+  fits:
+    description: "true when the configuration fits in VRAM, false otherwise"
+    value: ${{ steps.compute.outputs.fits }}
+  exit-code:
+    description: "CLI exit code: 0 fits, 2 does not fit, 1 usage error"
+    value: ${{ steps.compute.outputs.exit-code }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Set up Node
+      # Node 24 runs the TypeScript sources natively (type stripping), so the
+      # action needs no build step and no published artifact.
+      uses: actions/setup-node@v4
+      with:
+        node-version: "24"
+
+    - name: Compute plan
+      id: compute
+      shell: bash
+      env:
+        IN_CONFIG: ${{ inputs.config }}
+        IN_MODEL: ${{ inputs.model }}
+        IN_GPU: ${{ inputs.gpu }}
+        IN_QUANT: ${{ inputs.quant }}
+        IN_GPUS: ${{ inputs.gpus }}
+        IN_CONTEXT: ${{ inputs.context }}
+        IN_CONCURRENCY: ${{ inputs.concurrency }}
+        IN_PROMPT: ${{ inputs.prompt }}
+        IN_OUTPUT: ${{ inputs.output }}
+      run: |
+        set -u
+        CLI="${{ github.action_path }}/mini-services/mcp-server/cli.ts"
+
+        args=()
+        # Only pass flags the caller actually set, so the config file stays
+        # authoritative for everything else. $1 = flag name, $2 = value.
+        add() { if [ -n "${2:-}" ]; then args+=("--$1" "$2"); fi; }
+        add model        "$IN_MODEL"
+        add gpu          "$IN_GPU"
+        add quant        "$IN_QUANT"
+        add gpus         "$IN_GPUS"
+        add context      "$IN_CONTEXT"
+        add concurrency  "$IN_CONCURRENCY"
+        add prompt       "$IN_PROMPT"
+        add output       "$IN_OUTPUT"
+
+        plan_file="$RUNNER_TEMP/tokcalc-plan.md"
+        err_file="$RUNNER_TEMP/tokcalc-plan.err"
+
+        set +e
+        node "$CLI" plan --config "$IN_CONFIG" "${args[@]+"${args[@]}"}" >"$plan_file" 2>"$err_file"
+        code=$?
+        set -e
+
+        {
+          echo "exit-code=$code"
+          echo "fits=$([ "$code" -eq 0 ] && echo true || echo false)"
+        } >> "$GITHUB_OUTPUT"
+
+        {
+          echo "plan<<TOKCAL_PLAN_EOF"
+          cat "$plan_file"
+          echo "TOKCAL_PLAN_EOF"
+        } >> "$GITHUB_OUTPUT"
+
+        {
+          echo "error<<TOKCAL_ERR_EOF"
+          cat "$err_file"
+          echo "TOKCAL_ERR_EOF"
+        } >> "$GITHUB_OUTPUT"
+
+        if [ "$code" -eq 1 ]; then
+          echo "::notice title=tokcalc::$(head -c 400 "$err_file" | tr '\n' ' ')"
+        fi
+        if [ "$code" -eq 2 ]; then
+          echo "::warning title=tokcalc plan::This configuration does not fit in VRAM. See the report for the shortfall."
+        fi
+
+    - name: Post plan comment
+      if: ${{ inputs.comment == 'true' && github.event_name == 'pull_request' }}
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const plan = `${{ steps.compute.outputs.plan }}`;
+          const err = `${{ steps.compute.outputs.error }}`;
+          const marker = '<!-- tokcalc-plan -->';
+
+          let body;
+          if (plan.trim()) {
+            body = marker + '\n' + plan;
+          } else {
+            body = marker + '\n' + [
+              '### tokcalc',
+              '',
+              'No plan was produced. Add a `.tokcalc.json` to this repository, or pass inputs:',
+              '',
+              '```yaml',
+              '- uses: stevecrates489-commits/tokcalc@v0.3.0',
+              '  with:',
+              '    model: llama3-70b',
+              '    gpu: h100-sxm',
+              '    quant: fp8',
+              '```',
+              '',
+              err.trim() ? `<details><summary>CLI output</summary>\n\n\`\`\`\n${err.trim()}\n\`\`\`\n</details>` : ''
+            ].filter(Boolean).join('\n');
+          }
+
+          const { owner, repo } = context.repo;
+          const issue_number = context.payload.pull_request.number;
+          const q = await github.rest.issues.listComments({
+            owner, repo, issue_number, per_page: 100,
+          });
+          const existing = q.data.find(c => c.body && c.body.includes(marker));
+
+          if (existing) {
+            await github.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body });
+          } else {
+            await github.rest.issues.createComment({ owner, repo, issue_number, body });
+          }
+
+    - name: Fail on infeasible configuration
+      if: ${{ inputs.fail-on-infeasible == 'true' && steps.compute.outputs.exit-code == '2' }}
+      shell: bash
+      run: |
+        echo "::error title=tokcalc::Configuration does not fit in VRAM."
+        exit 1

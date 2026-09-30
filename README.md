@@ -48,6 +48,70 @@ Pick a model, a GPU, and a workload. Get an instant capacity plan:
 - **Shareable URL** — your config encoded in the URL hash, send to colleagues
 - **Copy as Markdown** — paste the full result into GitHub issues / Slack / docs
 
+## GitHub Action — plan on every PR
+
+If your repo declares a serving plan, tokcalc can check it. Drop a
+`.tokcalc.json` at the repo root:
+
+```json
+{
+  "model": "llama3-70b",
+  "gpu": "h100-sxm",
+  "quantization": "fp8",
+  "numGpus": 2,
+  "contextTokens": 32768,
+  "concurrency": 16
+}
+```
+
+Then add this to `.github/workflows/plan.yml`:
+
+```yaml
+name: tokcalc
+on:
+  pull_request:
+    paths: [".tokcalc.json"]
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: stevecrates489-commits/tokcalc@v0.3.0
+        with:
+          fail-on-infeasible: true
+```
+
+Every PR that touches the plan gets a comment with the VRAM budget, KV-cache
+sizing, throughput, TTFT/ITL, and cost — so a reviewer can check the model/GPU
+choice without leaving the diff.
+
+The action runs tokcalc's own `src/lib/token-calc.ts` from this repository, so
+the numbers it reports are the same ones the site and the MCP tools produce.
+There is no second implementation to drift.
+
+Any field can be overridden per-run, or you can skip the config file entirely:
+
+```yaml
+- uses: stevecrates489-commits/tokcalc@v0.3.0
+  with:
+    model: mixtral-8x7b
+    gpu: h200-sxm
+    quant: fp8
+    gpus: 2
+    context: 32768
+    concurrency: 32
+```
+
+Run the same thing locally without the action:
+
+```bash
+npx @tokcalc/mcp-server plan --config .tokcalc.json
+npx @tokcalc/mcp-server plan --model llama3-70b --gpu h100-sxm --quant fp8 --format json
+```
+
+Exit code is `0` when the plan fits, `2` when it does not, `1` on a usage error
+— so it works as a CI gate.
+
 ## Why tokcalc?
 
 The market has dozens of "tokens per second" calculators and self-host-vs-API
@@ -275,7 +339,7 @@ running at 10% utilization pays 10× more per token than the theoretical minimum
 ## Roadmap
 
 ### Shipped
-- ✅ 35 models, 30 GPUs, 16 quantization formats
+- ✅ 39 models, 31 GPUs, 16 quantization formats
 - ✅ Continuous batching, reasoning tokens, prompt caching
 - ✅ TTFT/ITL split, long-context superlinear attention
 - ✅ Long-context capacity planner + topology recommendation
@@ -283,37 +347,46 @@ running at 10% utilization pays 10× more per token than the theoretical minimum
 - ✅ Reference catalog (6 sub-tables including live pricing)
 - ✅ **Live GPU pricing** (Azure + AWS + GCP + Vast.ai parallel fetch with LIVE badges)
 - ✅ **Observed benchmark calibration** (paste vLLM/SGLang/TRT-LLM JSON → verdict)
-- ✅ **MCP server v0.2.0** — 7 read-only tools, stdio + Streamable HTTP transports
+- ✅ **MCP server v0.2.9** — 11 read-only tools, stdio + Streamable HTTP transports
+- ✅ **Single-core MCP architecture** — one `src/lib/mcp/core.ts`, shimmed into both the
+  hosted endpoint and the npm package, so the two surfaces cannot drift
+- ✅ **Published to the [MCP Registry](https://registry.modelcontextprotocol.io)** and kept
+  current by an OIDC workflow on every `v*` tag
+- ✅ **Correct MoE accounting** — resident (full) weights and active (per-token)
+  parameters reported separately, instead of conflating them
+- ✅ **Strict tool schemas** — Zod 4 native JSON Schema; unknown parameters are rejected
+  with the valid names suggested back
 - ✅ **Public hosted MCP endpoint** at `tokcalc.vercel.app/api/mcp` with bearer auth + Upstash Redis rate limiting
 - ✅ **Self-serve API key generation** at `tokcalc.vercel.app/mcp` (email → instant key)
 - ✅ **4 SEO landing pages**: `/compare/h100-vs-h200`, `/compare/gguf-q4-k-m-vs-q5-k-m`, `/self-host-vs-openai-api`, `/mcp` (install docs)
 - ✅ Share URL + localStorage persistence
-- ✅ Copy result as Markdown (for GitHub issues / Slack / docs)
+- ✅ **GitHub Action** — drops a capacity + cost plan straight onto your PR
+- ✅ **Copy result as Markdown** (for GitHub issues / Slack / docs)
 - ✅ Dark mode toggle
 - ✅ Plain-English glossary (28 terms with hover tooltips)
 - ✅ OG image + Twitter card + social metadata
 - ✅ Plausible Analytics (privacy-friendly) + Sentry error monitoring
 
 ### Next 30 days
-- ⏳ GitHub Action (`tokcalc/plan` PR comment)
-- ⏳ i18n: Chinese, Japanese, Korean
-- ⏳ MCP server v0.2.1: Fix empty `inputSchema` in `tools/list` response (zod-to-json-schema serialization issue)
-- ⏳ MCP server v0.3.0: OAuth 2.1 with PKCE for multi-user auth
+- ⏳ **Versioned price + benchmark provenance** — source URL + retrieval date on every rate and benchmark
+- ⏳ **P/D disaggregation planner** (separate prefill + decode pools)
+- ⏳ **Engine-aware presets** (vLLM / SGLang / TensorRT-LLM / llama.cpp) — UI integration
+- ⏳ **Multi-turn / agentic economics** — growing context and tool-call turns in the cost model
 
 ### Next 90 days
-- ⏳ Workload-trace / SLO capacity planner (prompt/output/arrival distributions, p50/p95 TTFT/ITL)
-- ⏳ P/D disaggregation planner (separate prefill + decode pools)
-- ⏳ Cache-aware economics (prefix-sharing distribution, multi-turn/agent traces)
-- ⏳ Engine-aware presets (vLLM / SGLang / TensorRT-LLM / llama.cpp) — UI integration
-- ⏳ Versioned price + benchmark provenance system
+- ⏳ Multi-LoRA capacity planner (Punica / S-LoRA economics)
+- ⏳ VLM image-token accounting (per-model patch/tile tokenization)
 
-### Long-term
-- 🔮 Agentic workflow calculator (multi-turn + tool calls + growing context)
-- 🔮 Multi-LoRA capacity planner (Punica / S-LoRA economics)
-- 🔮 VLM image-token accounting (per-model patch/tile tokenization)
-- 🔮 Embedding model mode (vectors/sec, separate workload)
-- 🔮 Training/fine-tuning estimator (LoRA / QLoRA / full-SFT FLOPs)
-- 🔮 Energy / carbon per million tokens (region-specific grid intensity)
+### Deliberately not doing
+
+- **~~i18n (Chinese / Japanese / Korean)~~** — permanent translation maintenance across
+  39 models × 30 GPUs × 11 tools, and traffic is currently overwhelmingly CI and agent
+  installs rather than human readers. Revisit only if CJK traffic shows up in analytics.
+- **~~OAuth 2.1 / PKCE~~** — auth infrastructure for a product with one user. Self-serve key
+  issuance plus Upstash rate limiting already covers the real need. Revisit on demand.
+- **~~Training/fine-tuning FLOPs, energy/carbon, embedding mode~~** — each of these is a
+  separate product in a separate domain. "Capacity planner" is a sharp position; widening
+  it into a general AI-infra calculator suite costs more than it earns.
 
 ## Open core model
 
