@@ -162,7 +162,7 @@ runs:
               'No plan was produced. Add a `.tokcalc.json` to this repository, or pass inputs:',
               '',
               '```yaml',
-              '- uses: stevecrates489-commits/tokcalc@main',
+              '- uses: stevecrates489-commits/tokcalc@v0.3.0',
               '  with:',
               '    model: llama3-70b',
               '    gpu: h100-sxm',
