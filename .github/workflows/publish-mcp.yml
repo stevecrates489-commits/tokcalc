@@ -1,0 +1,67 @@
+name: Publish MCP Server
+
+# Publishes the MCP server manifest (server.json) to the official MCP Registry
+# (https://registry.modelcontextprotocol.io) so the server is discoverable by
+# MCP clients without a manual install.
+#
+# The registry stores metadata only — it does not host artifacts. The npm
+# package must already be published before this runs, because the registry
+# verifies that the package's `mcpName` field matches server.json's `name` and
+# that the referenced version actually exists on npm.
+#
+# Triggers:
+#   - git push origin v*   (release path)
+#   - manual dispatch      (backfill / repair path)
+#
+# Auth uses GitHub OIDC (id-token: write) rather than a stored PAT, so there is
+# no long-lived registry credential in repo secrets.
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install mcp-publisher
+        run: |
+          curl -L "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz" \
+            | tar xz mcp-publisher
+          chmod +x mcp-publisher
+          ./mcp-publisher --help
+
+      - name: Guard — tag must match the code's MCP_SERVER_VERSION
+        # Prevents publishing a manifest that disagrees with the shipped server.
+        # Same invariant the local prepublish guard enforces, enforced again here
+        # because a tag can be pushed straight from a stale checkout.
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          TAG_VERSION="${GITHUB_REF#refs/tags/v}"
+          CODE_VERSION=$(grep -oP 'MCP_SERVER_VERSION = "\K[^"]+' src/lib/mcp-version.ts)
+          JSON_VERSION=$(grep -oP '"version": "\K[^"]+' server.json | head -1)
+          echo "tag=$TAG_VERSION code=$CODE_VERSION server.json=$JSON_VERSION"
+          if [ "$TAG_VERSION" != "$CODE_VERSION" ]; then
+            echo "::error::tag $TAG_VERSION != MCP_SERVER_VERSION $CODE_VERSION"
+            exit 1
+          fi
+          if [ "$TAG_VERSION" != "$JSON_VERSION" ]; then
+            echo "::error::tag $TAG_VERSION != server.json version $JSON_VERSION"
+            exit 1
+          fi
+
+      - name: Authenticate to MCP Registry (OIDC)
+        run: ./mcp-publisher login github-oidc
+
+      - name: Publish server.json to MCP Registry
+        run: ./mcp-publisher publish
