@@ -76,7 +76,7 @@ jobs:
   plan:
     runs-on: ubuntu-latest
     steps:
-      - uses: stevecrates489-commits/tokcalc@v0.3.0
+      - uses: stevecrates489-commits/tokcalc@main
         with:
           fail-on-infeasible: true
 ```
@@ -85,6 +85,9 @@ Every PR that touches the plan gets a comment with the VRAM budget, KV-cache
 sizing, throughput, TTFT/ITL, and cost — so a reviewer can check the model/GPU
 choice without leaving the diff.
 
+> Pin to a release tag (`@v0.3.0`) rather than `@main` once that tag is cut, so
+> the action can't change under you between runs.
+
 The action runs tokcalc's own `src/lib/token-calc.ts` from this repository, so
 the numbers it reports are the same ones the site and the MCP tools produce.
 There is no second implementation to drift.
@@ -92,7 +95,7 @@ There is no second implementation to drift.
 Any field can be overridden per-run, or you can skip the config file entirely:
 
 ```yaml
-- uses: stevecrates489-commits/tokcalc@v0.3.0
+- uses: stevecrates489-commits/tokcalc@main
   with:
     model: mixtral-8x7b
     gpu: h200-sxm
