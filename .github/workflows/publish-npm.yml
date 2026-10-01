@@ -1,0 +1,71 @@
+name: Publish MCP Server to npm
+
+# Publishes @tokcalc/mcp-server to npm using GitHub OIDC trusted publishing.
+# No long-lived npm token in repo secrets — npm issues a short-lived token
+# per run, and the binding between this workflow and the package is recorded
+# on the npm side (`npm trust github`, run once).
+#
+# Why: classic publish tokens bypass 2FA. npm is restricting those — see
+# https://github.blog/changelog/2026-09-09-npm-extends-recovery-code-security-holds-to-all-accounts/
+# Direct publishing from a laptop .npmrc will stop working in 2027.
+#
+# To set this up once:
+#   npm login
+#   npm trust github \
+#     --file .github/workflows/publish-npm.yml \
+#     --repository stevecrates489-commits/tokcalc \
+#     --environment npm --allow-publish --yes
+#
+# Triggers:
+#   - git push origin v*       (release path)
+#   - manual dispatch          (backfill / repair path)
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install MCP server dependencies
+        working-directory: mini-services/mcp-server
+        run: bun install --frozen-lockfile
+
+      - name: Build every bin entry point
+        working-directory: mini-services/mcp-server
+        run: bun run build
+
+      - name: Prepublish guard (artifact freshness + version sync + buildStamp)
+        working-directory: mini-services/mcp-server
+        run: node scripts/prepublish-check.js
+
+      - name: Guard — tag must match MCP_SERVER_VERSION and package.json
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          TAG_VERSION="${GITHUB_REF#refs/tags/v}"
+          CODE_VERSION=$(grep -oP 'MCP_SERVER_VERSION = "\K[^"]+' src/lib/mcp-version.ts)
+          PKG_VERSION=$(grep -oP '"version": "\K[^"]+' mini-services/mcp-server/package.json | head -1)
+          echo "tag=$TAG_VERSION code=$CODE_VERSION pkg=$PKG_VERSION"
+          [ "$TAG_VERSION" = "$CODE_VERSION" ] || { echo "::error::tag $TAG_VERSION != MCP_SERVER_VERSION $CODE_VERSION"; exit 1; }
+          [ "$TAG_VERSION" = "$PKG_VERSION"  ] || { echo "::error::tag $TAG_VERSION != package.json $PKG_VERSION";  exit 1; }
+
+      # npm auto-detects the OIDC token from ACTIONS_ID_TOKEN_REQUEST_TOKEN
+      # + ACTIONS_ID_TOKEN_REQUEST_URL, so no NPM_TOKEN secret is required.
+      - name: Publish to npm (OIDC trusted publishing)
+        working-directory: mini-services/mcp-server
+        run: npm publish
