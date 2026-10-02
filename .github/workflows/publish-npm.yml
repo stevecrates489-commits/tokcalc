@@ -42,6 +42,12 @@ jobs:
         with:
           bun-version: latest
 
+      - name: Install root dependencies
+        # src/lib/mcp/core.ts imports the SDK + zod, which only exist in the
+        # root node_modules — the package's own node_modules cannot resolve
+        # them because core.ts lives outside the package directory.
+        run: bun install --frozen-lockfile
+
       - name: Install MCP server dependencies
         working-directory: mini-services/mcp-server
         run: bun install --frozen-lockfile
