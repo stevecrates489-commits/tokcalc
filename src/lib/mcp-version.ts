@@ -12,7 +12,7 @@
  */
 
 /** npm package version this code corresponds to (@tokcalc/mcp-server). */
-export const MCP_SERVER_VERSION = "0.3.2";
+export const MCP_SERVER_VERSION = "0.3.3";
 
 /** Model/GPU catalog version (bumped when src/lib/token-calc.ts catalog changes). */
 export const CATALOG_VERSION = "0.3.0";

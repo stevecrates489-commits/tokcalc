@@ -26790,7 +26790,7 @@ var MLPERF_CURATED = [
 ];
 
 // ../../src/lib/mcp-version.ts
-var MCP_SERVER_VERSION = "0.3.2";
+var MCP_SERVER_VERSION = "0.3.3";
 var CATALOG_VERSION = "0.3.0";
 
 // ../../src/lib/mcp-store.ts
