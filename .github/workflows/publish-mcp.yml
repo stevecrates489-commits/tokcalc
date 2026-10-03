@@ -64,4 +64,17 @@ jobs:
         run: ./mcp-publisher login github-oidc
 
       - name: Publish server.json to MCP Registry
-        run: ./mcp-publisher publish
+        # The registry validates that the referenced npm package version exists,
+        # but npm publish-npm.yml runs in parallel from the same tag push and
+        # npm registry indexing is async. Retry up to ~3 minutes before giving
+        # up — npm usually propagates in <60s.
+        run: |
+          for i in $(seq 1 18); do
+            if ./mcp-publisher publish; then
+              exit 0
+            fi
+            echo "::warning::mcp-publisher publish failed (attempt $i/18); waiting 10s for npm to propagate"
+            sleep 10
+          done
+          echo "::error::mcp-publisher publish did not succeed after 3 minutes"
+          exit 1
