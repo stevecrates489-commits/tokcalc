@@ -38,6 +38,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Trusted publishing requires npm >= 11.5.1. ubuntu-latest's preinstalled
+      # npm (Node 22's npm 10.x) does not speak OIDC, so `npm publish` falls
+      # back to ENEEDAUTH. Pinning Node 24 here puts npm 11.x on PATH; bun
+      # continues to do the install/build work.
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          registry-url: "https://registry.npmjs.org"
+
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest

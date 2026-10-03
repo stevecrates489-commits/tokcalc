@@ -3,7 +3,7 @@
   "name": "io.github.stevecrates489-commits/tokcalc",
   "title": "tokcalc MCP Server",
   "description": "LLM serving capacity planner: VRAM, KV cache, GPU topology, latency, and cost.",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "status": "active",
   "repository": {
     "type": "git",
@@ -16,7 +16,7 @@
     {
       "registryType": "npm",
       "identifier": "@tokcalc/mcp-server",
-      "version": "0.3.1",
+      "version": "0.3.2",
       "transport": {
         "type": "stdio"
       }
