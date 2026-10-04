@@ -67,10 +67,17 @@ jobs:
         # The registry validates that the referenced npm package version exists,
         # but npm publish-npm.yml runs in parallel from the same tag push and
         # npm registry indexing is async. Retry up to ~3 minutes before giving
-        # up — npm usually propagates in <60s.
+        # up — npm usually propagates in <60s. "cannot publish duplicate
+        # version" means a previous attempt (or another workflow run) already
+        # registered this server.json — treat it as success.
         run: |
           for i in $(seq 1 18); do
-            if ./mcp-publisher publish; then
+            if out=$(./mcp-publisher publish 2>&1); then
+              exit 0
+            fi
+            echo "$out"
+            if echo "$out" | grep -qi "cannot publish duplicate version"; then
+              echo "::notice::server.json already registered — treating duplicate-version error as success"
               exit 0
             fi
             echo "::warning::mcp-publisher publish failed (attempt $i/18); waiting 10s for npm to propagate"
