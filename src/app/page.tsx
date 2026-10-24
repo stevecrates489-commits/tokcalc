@@ -71,10 +71,12 @@ import {
 import {
   calculate,
   fmtBytes,
+  fmtKb,
   fmtMoney,
   fmtMs,
   fmtTokens,
   fmtContext,
+  FIRST_ANSWER_TOKENS,
   GPUS,
   MODELS,
   QUANTIZATIONS,
@@ -128,7 +130,7 @@ const GLOSSARY = {
   latency: "Total wait time from when a user sends a prompt to when they get the full answer back.",
   vram: "Video RAM — the GPU's own memory. The model + its scratch space (KV cache) must fit entirely inside this. If it doesn't fit, the model won't run on this GPU.",
   modelWeights: "The actual 'brain' of the model — billions of numbers stored in VRAM. Size = params × bytes per param. Bigger = smarter but slower and pricier.",
-  kvCache: "Scratch memory the model keeps while generating, so it doesn't re-read your prompt every token. Grows with conversation length and number of users.",
+  kvCache: "Scratch memory the model keeps while generating, so it doesn't re-read your prompt every token. Grows with conversation length and number of users. Not every model grows it the same way: sliding-window layers stop growing at their window, linear-attention layers keep a fixed-size state instead of a cache, and MLA layers store one compressed latent instead of a full key-value pair.",
   params: "Number of 'neurons' (actually weight values) in the model. More params = smarter but slower & uses more VRAM. 'B' = billion. So 7B = 7,000,000,000 weights.",
   active: "For MoE (mixture-of-experts) models, only some experts activate per token. 'Active params' = what actually gets used per token, vs total params = the whole model size on disk.",
   layers: "How many 'stacked blocks' the model has. Deeper = smarter reasoning, but each token must pass through all of them, so it's slower.",
@@ -145,7 +147,8 @@ const GLOSSARY = {
   moe: "Mixture-of-Experts: a model with many 'expert' sub-networks, where only a few activate per token. Total size on disk is large, but per-token work is small. Example: Mixtral 8x7B has 47B total but only ~13B active per token.",
   gqa: "Grouped-Query Attention: an optimization that shares the same 'memory scratch space' (KV cache) across multiple attention heads. Cuts VRAM use significantly.",
   continuousBatching: "A serving trick where the GPU keeps generating tokens for active requests while NEW requests join mid-flight. Big speedup (1.5-4x typical) for production traffic. Used by vLLM, TGI, SGLang.",
-  ttft: "Time-to-first-token: how long the user waits before seeing the first word. Equals prefill time (the model reading your prompt). Lower = better UX.",
+  ttft: "Time-to-first-token: how long until the first token appears. Modeled as prefill time (the model reading your prompt) PLUS the first decode step, so it is slightly more than prefill alone — the old 'TTFT = prefill' claim was not quite right. Lower = better UX. For what a user actually perceives, see first-answer latency.",
+  firstAnswer: "First-answer latency: time until the user has a readable answer, not just a first token. It is TTFT plus the time to decode the first sentence. A 200-token answer usually needs a few more tokens before a human can act on it, so this is usually several times TTFT. If you are writing an SLO, this is the number that matters.",
   itl: "Inter-token-latency: how fast the model writes each token AFTER the first. This is what users perceive as 'streaming speed'.",
   promptCaching: "Reuse the model's work from a repeated prompt prefix (system prompt, RAG docs, tool schemas). On cache hit, you skip the prefill computation for that prefix. Anthropic: 90% off cached tokens. OpenAI: 50% off.",
   reasoningTokens: "Hidden tokens the model generates internally before answering (e.g. OpenAI o1, DeepSeek R1, Claude thinking). Billed as output but invisible to the user. Important for cost estimates of reasoning models.",
@@ -717,7 +720,7 @@ export default function Home() {
                   <div className="pt-2">
                     <div className="flex items-center justify-between mb-2">
                       <Label className="text-xs flex items-center gap-1">
-                        GPUs to use
+                        Accelerators to use
                         <HelpIcon term="tensorParallel" />
                       </Label>
                       <Badge variant="outline" className="text-[10px] font-mono">{numGpus}×</Badge>
@@ -1052,8 +1055,7 @@ export default function Home() {
                   sub={`+ ${fmtMs(result.itlMs)} per token`}
                   glossaryKey="ttft"
                   confidence={result.confidence.ttftMs}
-                />
-              </div>
+                />              </div>
 
               {result.longContextWarning && (
                 <div className="flex items-start gap-3 p-3 rounded-lg border border-blue-500/30 bg-blue-500/5">
@@ -1144,7 +1146,17 @@ export default function Home() {
                     <Metric
                       label="Conversation memory"
                       value={fmtBytes(result.kvCacheTotalGb)}
-                      hint={`${fmtBytes(result.kvCachePerTokenKb / 1024)}/tok × ${promptTokens} tok × ${batchSize}`}
+                      hint={[
+                        `${fmtKb(result.kvCachePerTokenKb)}/tok × ${promptTokens.toLocaleString()} tok × ${batchSize}`,
+                        result.stateBytesGb > 0
+                          ? `+ ${fmtBytes(result.stateBytesGb)} fixed recurrent state`
+                          : null,
+                        selectedModel.attentionLayers
+                          ? "effective avg — hybrid attention"
+                          : null,
+                      ]
+                        .filter(Boolean)
+                        .join(" · ")}
                       glossaryKey="kvCache"
                       confidence={result.confidence.kvCacheTotalGb}
                     />
@@ -1214,6 +1226,13 @@ export default function Home() {
                     confidence={result.confidence.prefillTokensPerSec}
                   />
                   <Metric
+                    label="First answer (readable)"
+                    value={fmtMs(result.firstAnswerLatencyMs)}
+                    hint={`TTFT + ${FIRST_ANSWER_TOKENS}-token first clause`}
+                    glossaryKey="firstAnswer"
+                    confidence={result.confidence.firstAnswerLatencyMs}
+                  />
+                  <Metric
                     label="Batch sweet spot"
                     value={result.batchCrossover.toFixed(0)}
                     hint="users where adding more stops helping"
@@ -1250,7 +1269,7 @@ export default function Home() {
                 </CardHeader>
                 <CardContent className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-sm">
                   <Metric
-                    label="GPU rent cost"
+                    label="Accelerator rent cost"
                     value={fmtMoney(result.costPerHour) + "/hr"}
                     hint={numGpus > 1 ? `${selectedGpu.usdPerHour} × ${numGpus} GPUs` : "per GPU"}
                     confidence={result.confidence.costPerHour}
@@ -1324,10 +1343,10 @@ export default function Home() {
               <Card className="border-border/60 shadow-sm">
                 <CardHeader className="pb-2">
                   <CardTitle className="text-sm">
-                    Compare GPUs — {selectedModel.name} ({selectedQuant.label})
+                    Compare accelerators — {selectedModel.name} ({selectedQuant.label})
                   </CardTitle>
                   <CardDescription className="text-xs">
-                    Speed of the same model on every GPU big enough to fit it. Green = your current pick.
+                    Speed of the same model on every accelerator big enough to fit it. Green = your current pick.
                   </CardDescription>
                 </CardHeader>
                 <CardContent>
@@ -1779,7 +1798,7 @@ export default function Home() {
                 All models
               </Link>
               <Link href="/gpus" className="inline-flex items-center text-xs px-2.5 py-1.5 rounded-md border border-border/60 text-muted-foreground hover:text-foreground hover:border-emerald-500/40 hover:bg-muted/60 transition-colors">
-                All GPUs
+                All accelerators
               </Link>
               <Link href="/compare/h100-vs-h200" className="inline-flex items-center text-xs px-2.5 py-1.5 rounded-md border border-border/60 text-muted-foreground hover:text-foreground hover:border-emerald-500/40 hover:bg-muted/60 transition-colors">
                 H100 vs H200
@@ -2129,7 +2148,7 @@ function BuildVsBuyTab() {
             </div>
             <div>
               <div className="flex items-center justify-between mb-1.5">
-                <Label className="text-xs">GPUs</Label>
+                <Label className="text-xs">Accelerators</Label>
                 <Badge variant="outline" className="text-[10px] font-mono">{shNumGpus}×</Badge>
               </div>
               <Slider value={[shNumGpus]} min={1} max={8} step={1} onValueChange={(v) => setShNumGpus(v[0])} className="w-full" />
@@ -2561,7 +2580,7 @@ function ReferenceTab() {
       <div className="mb-2 max-w-3xl">
         <h2 className="text-xl font-semibold tracking-tight mb-1">Reference catalog</h2>
         <p className="text-sm text-muted-foreground leading-relaxed">
-          All models, GPUs, quantizations, live API pricing, and live cloud GPU pricing used by tokcalc.
+          All models, accelerators &amp; systems, quantizations, live API pricing, and live cloud pricing used by tokcalc.
           Every record has a source link where available.
         </p>
       </div>
@@ -2570,7 +2589,7 @@ function ReferenceTab() {
         <div className="flex gap-1 -mb-px overflow-x-auto">
           {([
             { id: "models", label: "Models" },
-            { id: "gpus", label: "GPUs" },
+            { id: "gpus", label: "Accelerators & systems" },
             { id: "quants", label: "Quantization" },
             { id: "api", label: "API pricing" },
             { id: "cloud", label: "Cloud GPU pricing" },

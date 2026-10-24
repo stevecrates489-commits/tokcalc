@@ -42,6 +42,9 @@ jobs:
       - name: Typecheck (zero errors allowed)
         run: bunx tsc --noEmit
 
+      - name: Catalog validation (Zod schemas + id/provenance integrity)
+        run: bun scripts/catalog-validate.ts
+
       - name: Build MCP server dist
         working-directory: mini-services/mcp-server
         run: bun run build
@@ -55,6 +58,9 @@ jobs:
 
       - name: Surface-parity suite
         run: bun test tests/mcp-surface-parity.test.ts
+
+      - name: Catalog module suite
+        run: bun test tests/catalog.test.ts
 
       - name: Stdio QA battery (35 checks) against fresh dist
         run: node tests/qa-live-probe.mjs local

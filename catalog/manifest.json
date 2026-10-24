@@ -1,0 +1,15 @@
+{
+  "catalogVersion": "0.4.0",
+  "description": "tokcalc model / accelerator / quantization catalog. JSON records are the source of truth; src/catalog/loader.ts is the one loader used by the website, the MCP server and the CLI.",
+  "updatedAt": "2026-10-24",
+  "files": {
+    "models": "models.json",
+    "accelerators": "accelerators.json",
+    "quantizations": "quantizations.json"
+  },
+  "counts": {
+    "models": 44,
+    "accelerators": 31,
+    "quantizations": 16
+  }
+}

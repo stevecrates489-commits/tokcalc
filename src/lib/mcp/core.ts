@@ -369,6 +369,7 @@ function handleEstimateCapacity(input: z.infer<typeof EstimateCapacitySchema>) {
       },
       aggregateTokensPerSecond: Math.round(result.aggregateTokensPerSec),
       ttftMs: { expected: Math.round(result.ttftMs) },
+      firstAnswerLatencyMs: Math.round(result.firstAnswerLatencyMs),
       itlMs: { expected: Math.round(result.itlMs) },
       totalLatencyMs: Math.round(result.totalLatencyMs),
     },
@@ -380,6 +381,7 @@ function handleEstimateCapacity(input: z.infer<typeof EstimateCapacitySchema>) {
         ? "MoE: modelWeightsGb is ALL experts resident in VRAM. activeParamsGb is the per-token working set used for the bandwidth math. They differ by ~10x — use modelWeightsGb for capacity, activeParamsGb for speed."
         : "Dense model: modelWeightsGb equals activeParamsGb.",
       kvCacheGb: +result.kvCacheTotalGb.toFixed(2),
+      stateBytesGb: +result.stateBytesGb.toFixed(2),
       kvQuantization: input.kvQuantization,
       totalRequiredGb: +result.totalVramNeededGb.toFixed(2),
       availableGb: gpu ? gpu.vramGb * input.gpuCount : 0,
@@ -721,9 +723,39 @@ function handleListModels(input: z.infer<typeof ListModelsSchema>) {
       isMoE: m.isMoE,
       layers: m.layers,
       maxContext: m.maxContext,
+      // How this model's attention is actually laid out. "full" means every
+      // layer caches keys and values for the whole context; a mixed layout
+      // means the KV cache does NOT grow linearly with context, which changes
+      // the capacity maths entirely.
+      attentionKinds: attentionKindSummary(m),
+      architectureStatus: m.architectureStatus ?? "supported",
+      nativeWeightFormat: m.nativeWeightFormat ?? null,
+      residentWeightBytes: m.residentWeightBytes ?? null,
+      license: m.license ?? null,
+      repository: m.repository ?? null,
     })),
     catalogVersion: CATALOG_VERSION,
   };
+}
+
+/**
+ * One-line summary of a model's per-layer attention layout, e.g.
+ * "12 full + 12 sliding". Plain full-attention models report "full".
+ *
+ * The kinds are listed in a fixed order (full → sliding → linear → kda →
+ * mla), not in the order they first appear, so the string is stable
+ * regardless of how the checkpoint interleaves its layers.
+ */
+function attentionKindSummary(model: {
+  attentionLayers?: Array<{ kind: string }>;
+}): string {
+  if (!model.attentionLayers) return "full";
+  const counts = new Map<string, number>();
+  for (const l of model.attentionLayers) counts.set(l.kind, (counts.get(l.kind) ?? 0) + 1);
+  const ORDER = ["full", "sliding", "linear", "kda", "mla"];
+  return ORDER.filter((k) => counts.has(k))
+    .map((k) => `${counts.get(k)} ${k}`)
+    .join(" + ");
 }
 
 function handleListGpus(input: z.infer<typeof ListGpusSchema>) {
@@ -1372,61 +1404,119 @@ function handleRecordMeasured(input: z.infer<typeof RecordMeasuredSchema>) {
 // TOOL DEFINITIONS
 // ============================================================
 
+/**
+ * MCP tool annotations.
+ *
+ * These are part of the wire format (`tools/list`) and they are not
+ * decoration: a client uses `readOnlyHint` to decide whether a tool is safe
+ * to call speculatively, in parallel, or without asking the user first.
+ *
+ * `record_measured` is the one tool in this server that writes. It used to be
+ * described in the docs as one of "11 read-only tools", which was wrong — it
+ * persists a calibration measurement and changes the numbers later
+ * `estimate_capacity` calls return for that cell. It is now declared
+ * honestly, and the surface-parity test enforces it.
+ */
+export interface ToolAnnotations {
+  /** Human-readable title for the tool. */
+  title: string;
+  /** The tool does not modify its environment. */
+  readOnlyHint: boolean;
+  /** The tool may perform destructive updates. */
+  destructiveHint: boolean;
+  /** Repeating the call with the same arguments has no additional effect. */
+  idempotentHint: boolean;
+  /** The tool may interact with external entities (network, other systems). */
+  openWorldHint: boolean;
+}
+
+/** A tool that only reads the catalog and computes — no side effects. */
+const READ_ONLY = (title: string): ToolAnnotations => ({
+  title,
+  readOnlyHint: true,
+  destructiveHint: false,
+  idempotentHint: true,
+  openWorldHint: false,
+});
+
 const TOOL_DEFINITIONS = [
   {
     name: "estimate_capacity",
     description: "Estimate whether an LLM-serving configuration fits in memory and can meet throughput and latency targets. Returns VRAM/KV-cache breakdown, throughput and latency ranges, concurrency, cost, confidence, assumptions, and sources.",
     inputSchema: formatInputSchema(EstimateCapacitySchema),
+    annotations: READ_ONLY("Estimate serving capacity"),
   },
   {
     name: "compare_gpus",
     description: "Compare supported GPU or cloud SKU options for the same LLM workload. Use before recommending hardware.",
     inputSchema: formatInputSchema(CompareGpusSchema),
+    annotations: READ_ONLY("Compare accelerators"),
   },
   {
     name: "recommend_topology",
     description: "Recommend feasible GPU/topology designs including tensor parallelism and context parallel (RingAttention) when needed.",
     inputSchema: formatInputSchema(RecommendTopologySchema),
+    annotations: READ_ONLY("Recommend GPU topology"),
   },
   {
     name: "estimate_api_vs_self_host",
     description: "Compare monthly token-based API costs with self-hosted GPU infrastructure under stated utilization assumptions.",
     inputSchema: formatInputSchema(EstimateApiVsSelfHostSchema),
+    annotations: READ_ONLY("Compare API vs self-host"),
   },
   {
     name: "list_models",
     description: "List tokcalc-supported model IDs and metadata. Use before estimating if the requested model is ambiguous or unknown.",
     inputSchema: formatInputSchema(ListModelsSchema),
+    annotations: READ_ONLY("List supported models"),
   },
   {
     name: "list_gpus",
     description: "List GPU and cloud SKU IDs, memory, bandwidth, pricing, and categories.",
     inputSchema: formatInputSchema(ListGpusSchema),
+    annotations: READ_ONLY("List supported accelerators"),
   },
   {
     name: "get_mlperf_benchmarks",
     description: "Retrieve curated MLPerf Inference v4.1 LLM benchmark reference configurations. Throughput is computed by tokcalc formulas (confidence_tier=derived). Use to cross-validate theoretical estimates against audited system configurations.",
     inputSchema: formatInputSchema(GetMlperfBenchmarksSchema),
+    annotations: READ_ONLY("Get MLPerf reference results"),
   },
   {
     name: "find_config_for_slo",
     description: "INVERSE planner: given model + context + traffic volume + optional TTFT/cost/throughput ceilings, search every GPU × topology (1/2/4/8 GPUs) and return feasible configurations ranked by cost, throughput, or value. Use when the user knows their SLOs but not the hardware.",
     inputSchema: formatInputSchema(FindConfigForSloSchema),
+    annotations: READ_ONLY("Find a config for an SLO"),
   },
   {
     name: "plan_deployment",
     description: "One-call deployment decision brief for a specific config: memory breakdown with KV headroom, performance, rig cost, blended build-vs-buy with break-even, concrete risks (no-NVLink TP, tight headroom, long context), and next steps. Chains what would otherwise take 4 separate tool calls.",
     inputSchema: formatInputSchema(PlanDeploymentSchema),
+    annotations: READ_ONLY("Plan a deployment"),
   },
   {
     name: "fetch_model_spec",
     description: "Fetch a model's real config.json from HuggingFace and diff it against tokcalc's catalog (layers, KV heads, head_dim, vocab, max context). Catches catalog drift before it corrupts KV-cache math. Cached 24h locally; use forceRefresh to re-fetch. Works offline via cache fallback.",
     inputSchema: formatInputSchema(FetchModelSpecSchema),
+    // Reads a remote model card, so it touches the open world — but it only
+    // ever writes to tokcalc's own local cache, never to the user's system.
+    annotations: { ...READ_ONLY("Fetch upstream model spec"), openWorldHint: true },
   },
   {
     name: "record_measured",
     description: "Record a real-world measurement (observed tok/s, TTFT, ITL) for a model+GPU+quantization cell. Compares against the model's prediction, stores a measured/predicted ratio, and future estimate_capacity / find_config_for_slo results for that cell are annotated with your calibration. The estimator improves as you use it.",
     inputSchema: formatInputSchema(RecordMeasuredSchema),
+    // This one WRITES. It persists a measurement to disk and changes the
+    // numbers later estimate_capacity calls return for that cell. Declaring
+    // it read-only would tell a client it is safe to call speculatively or
+    // concurrently — it is not.
+    annotations: {
+      title: "Record a measured benchmark",
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
   },
 ];
 
@@ -1439,8 +1529,15 @@ const TOOL_DEFINITIONS = [
  * all agree. Adding a 12th tool means touching exactly: the schema, the
  * handler, the switch case — and the parity test forces the docs to follow.
  */
-export const TOOL_CATALOG: ReadonlyArray<{ name: string; description: string }> =
-  TOOL_DEFINITIONS.map((t) => ({ name: t.name, description: t.description }));
+export const TOOL_CATALOG: ReadonlyArray<{
+  name: string;
+  description: string;
+  annotations: ToolAnnotations;
+}> = TOOL_DEFINITIONS.map((t) => ({
+  name: t.name,
+  description: t.description,
+  annotations: t.annotations,
+}));
 
 /** The schema backing each tool, so we can echo valid names on a bad call. */
 const TOOL_SCHEMAS: Record<string, z.ZodType> = {

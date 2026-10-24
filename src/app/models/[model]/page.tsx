@@ -20,9 +20,10 @@ import {
   concurrencyAtContext,
   multiGpuCaveat,
   hasModelGpuPage,
+  attentionSummary,
   type ModelContent,
 } from "@/lib/content/model-content";
-import { fmtTokens, fmtMoney, fmtBytes, fmtContext } from "@/lib/token-calc";
+import { fmtTokens, fmtMoney, fmtBytes, fmtKb, fmtContext } from "@/lib/token-calc";
 
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? "https://tokcalc.vercel.app";
 
@@ -107,6 +108,7 @@ export default async function ModelPage({
 
   const defRow = quantRows.find((r) => r.quant.id === defaultQuant)!;
   const fp16Row = quantRows.find((r) => r.quant.id === "fp16")!;
+  const attention = attentionSummary(model);
 
   // Top GPU rows: everything that fits, capped so the table stays readable.
   const fittingRows = gpuFits.filter((g) => g.fits).slice(0, 12);
@@ -495,6 +497,7 @@ export default async function ModelPage({
                 ["Total parameters", `${model.paramsB.toFixed(2)}B`],
                 ["Active parameters per token", `${model.activeParamsB.toFixed(2)}B`],
                 ["Architecture", model.isMoE ? "Mixture-of-Experts" : "Dense"],
+                ["Attention layout", attention.label],
                 ["Transformer layers", String(model.layers)],
                 ["Hidden dimension", String(model.hiddenDim)],
                 [
@@ -504,7 +507,35 @@ export default async function ModelPage({
                 ["Head dimension", String(model.headDim)],
                 ["Vocabulary size", model.vocabSize.toLocaleString()],
                 ["Max context (catalog)", fmtContext(model.maxContext)],
-                ["KV cache per token", `${((2 * model.layers * model.kvHeads * model.headDim * 2) / 1024).toFixed(2)} KB`],
+                ...(model.nativeContext
+                  ? ([["Native context", fmtContext(model.nativeContext)]] as [string, string][])
+                  : []),
+                ...(model.contextExtensionMethod
+                  ? ([["Context extension", model.contextExtensionMethod]] as [string, string][])
+                  : []),
+                [
+                  `KV cache per token @ ${fmtContext(REF_CONTEXT)}`,
+                  fmtKb(attention.kvPerTokenKb),
+                ],
+                ...(attention.stateGb > 0
+                  ? ([
+                      ["Fixed recurrent state", `${fmtBytes(attention.stateGb)} per request`],
+                    ] as [string, string][])
+                  : []),
+                ...(model.residentWeightBytes
+                  ? ([
+                      [
+                        "Native checkpoint size",
+                        fmtBytes(model.residentWeightBytes / 1e9),
+                      ],
+                    ] as [string, string][])
+                  : []),
+                ...(model.nativeWeightFormat
+                  ? ([["Native weight format", model.nativeWeightFormat]] as [string, string][])
+                  : []),
+                ...(model.license
+                  ? ([["License", model.license]] as [string, string][])
+                  : []),
               ].map(([label, value]) => (
                 <tr key={label} className="border-b border-border/30 last:border-0">
                   <td className="px-4 py-2 text-muted-foreground">{label}</td>
@@ -513,6 +544,20 @@ export default async function ModelPage({
               ))}
             </tbody>
           </table>
+          <p className="px-4 py-3 text-xs text-muted-foreground border-t border-border/30">
+            {attention.detail}
+            {model.architectureStatus === "memory-only" && (
+              <>
+                {" "}
+                <span className="text-amber-600 dark:text-amber-400">
+                  This model&apos;s architecture is only partially modelled
+                </span>{" "}
+                — the memory figure above is a lower bound, because one
+                architecture-specific cache is not modelled. Throughput should
+                be read as an upper bound.
+              </>
+            )}
+          </p>
         </CardContent>
       </Card>
 

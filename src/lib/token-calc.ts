@@ -9,243 +9,49 @@
  *   - Real-world efficiency factor (~0.65) accounts for kernel overhead, KV cache reads, attention, sampling
  */
 
-export type Quantization =
-  | "fp32" | "fp16" | "bf16" | "int8" | "int4"
-  | "gguf-q2k" | "gguf-q3km" | "gguf-q4km" | "gguf-q5km" | "gguf-q6k" | "gguf-q8"
-  | "gptq4" | "awq4" | "exl2-6bpw" | "fp8" | "nvfp4";
+/* ============================================================
+   CATALOG
+   ------------------------------------------------------------
+   The model / accelerator / quantization data no longer lives in this
+   file. It lives in catalog/*.json (the editable source of truth, reviewed
+   in Git) and is loaded through src/catalog/loader.ts — the ONE loader used
+   by the website, the MCP server and the CLI.
 
-export interface QuantMeta {
-  id: Quantization;
-  label: string;
-  /** Effective bytes per parameter (averaged across tensor mix for GGUF) */
-  bytesPerParam: number;
-  /** Dequantization overhead multiplier (1.0 = none, 0.85 = 15% overhead)
-   *  For FP8 on H100: efficiency >1.0 (faster than FP16 due to native FP8 kernels) */
-  efficiency: number;
-  description: string;
-  /** Format family — for engine-matching UI */
-  family: "float" | "gguf" | "gptq" | "awq" | "exl2" | "fp8" | "nvfp4";
-  /** Typical use case */
-  useCase?: string;
-}
+   The types are re-exported below so every existing import path keeps
+   working. There is exactly ONE copy of the catalog data in the repo.
+   ============================================================ */
+import {
+  MODELS,
+  MODEL_MAP,
+  ACCELERATORS,
+  ACCELERATOR_MAP,
+  QUANTIZATIONS,
+  QUANT_MAP,
+} from "../catalog/loader";
 
-// GGUF variants: based on llama.cpp quantize README for Llama 3 8B file sizes.
-// Refs: https://github.com/ggml-org/llama.cpp/blob/master/tools/quantize/README.md
-export const QUANTIZATIONS: QuantMeta[] = [
-  // === Float / native precision ===
-  { id: "fp32",  label: "FP32 (raw)",   bytesPerParam: 4.0,  efficiency: 1.00, family: "float", description: "32-bit float. Highest accuracy, 2x size of FP16." },
-  { id: "fp16",  label: "FP16",         bytesPerParam: 2.0,  efficiency: 1.00, family: "float", description: "16-bit float. Standard for inference, no dequant overhead." },
-  { id: "bf16",  label: "BF16",         bytesPerParam: 2.0,  efficiency: 1.00, family: "float", description: "Brain Float 16. Same size as FP16, better numerical range." },
-  // === Generic integer quantization (legacy bucket for vLLM/TGI default) ===
-  { id: "int8",  label: "INT8",         bytesPerParam: 1.0,  efficiency: 0.88, family: "float", description: "8-bit integer. Halves memory, ~12% dequant overhead." },
-  { id: "int4",  label: "INT4 (generic)", bytesPerParam: 0.5, efficiency: 0.80, family: "float", description: "4-bit integer (generic). For specific format, pick GPTQ-4 / AWQ-4 / GGUF Q4_K_M." },
+import type {
+  AcceleratorRecord,
+  GpuCategory,
+  GpuSpec,
+  ModelCategory,
+  ModelSpec,
+  Quantization,
+  QuantMeta,
+  QuantizationRecord,
+} from "../catalog/types";
 
-  // === GGUF variants (llama.cpp) ===
-  { id: "gguf-q2k",  label: "GGUF Q2_K",   bytesPerParam: 0.37, efficiency: 0.92, family: "gguf", description: "~2.6 bpw effective. Smallest; significant accuracy loss, use only as last resort.", useCase: "Extreme low-memory edge devices" },
-  { id: "gguf-q3km",  label: "GGUF Q3_K_M", bytesPerParam: 0.42, efficiency: 0.93, family: "gguf", description: "~3.9 bpw. Low quality; acceptable for some chat uses but not coding/math.", useCase: "Low-memory local inference" },
-  { id: "gguf-q4km",  label: "GGUF Q4_K_M", bytesPerParam: 0.55, efficiency: 0.90, family: "gguf", description: "~4.8 bpw. Recommended sweet spot for local Llama/Mistral on consumer GPUs.", useCase: "Recommended for local inference" },
-  { id: "gguf-q5km",  label: "GGUF Q5_K_M", bytesPerParam: 0.68, efficiency: 0.92, family: "gguf", description: "~5.7 bpw. Higher quality than Q4, ~30% larger. Good when memory allows.", useCase: "Quality-focused local inference" },
-  { id: "gguf-q6k",   label: "GGUF Q6_K",   bytesPerParam: 0.82, efficiency: 0.95, family: "gguf", description: "~6.6 bpw. Near-FP16 quality, ~60% larger than Q4_K_M.", useCase: "Near-lossless local inference" },
-  { id: "gguf-q8",    label: "GGUF Q8_0",   bytesPerParam: 1.07, efficiency: 0.98, family: "gguf", description: "~8.5 bpw. Effectively lossless, ~half the size of FP16.", useCase: "Reference / lossless storage" },
-
-  // === GPTQ (post-training weight quantization) ===
-  { id: "gptq4",  label: "GPTQ 4-bit",   bytesPerParam: 0.55, efficiency: 0.85, family: "gptq", description: "Post-training 4-bit weight quant. Supported by vLLM, TGI, TensorRT-LLM (varies by version).", useCase: "vLLM/TGI serverless" },
-  // === AWQ (activation-aware weight quantization) ===
-  { id: "awq4",   label: "AWQ 4-bit",    bytesPerParam: 0.55, efficiency: 0.88, family: "awq", description: "Activation-aware W4A16. Preserves salient weights; better accuracy than GPTQ in some setups.", useCase: "vLLM/TensorRT-LLM serving" },
-  // === EXL2 (ExLlamaV2, mixed-bit) ===
-  { id: "exl2-6bpw", label: "EXL2 6.0 bpw", bytesPerParam: 0.75, efficiency: 0.92, family: "exl2", description: "Mixed-bit quantization for ExLlamaV2. Common 6.0 bpw preset balances speed/quality on consumer NVIDIA.", useCase: "Consumer NVIDIA + ExLlamaV2" },
-  // === FP8 (H100/H200 native) ===
-  { id: "fp8",    label: "FP8 (E4M3)",   bytesPerParam: 1.0,  efficiency: 1.5,  family: "fp8", description: "8-bit floating-point. Native on H100/H200 — FASTER than FP16 (efficiency >1). Same VRAM as INT8 but better quality.", useCase: "H100/H200 with TRT-LLM/vLLM" },
-  // === NVFP4 (Blackwell only) ===
-  { id: "nvfp4",  label: "NVFP4 (Blackwell)", bytesPerParam: 0.5, efficiency: 1.2, family: "nvfp4", description: "4-bit floating-point with block scaling. Native on Blackwell (B200/B300). Roughly 2x faster than FP8 on B200 in cited tests.", useCase: "Blackwell B200/B300 only" },
-];
-
-export const QUANT_MAP: Record<Quantization, QuantMeta> =
-  Object.fromEntries(QUANTIZATIONS.map((q) => [q.id, q])) as Record<Quantization, QuantMeta>;
-
-export type GpuCategory = "datacenter" | "workstation" | "consumer" | "mac" | "tpu" | "lpu" | "wse" | "rdu" | "legacy";
-
-export interface GpuSpec {
-  id: string;
-  name: string;
-  vendor: string;
-  category: GpuCategory;
-  /** HBM bandwidth in GB/s */
-  memBandwidthGbps: number;
-  /** FP16/BF16 compute in TFLOPS (dense, not sparse). null = vendor does not publish dense FP16 (e.g. B200 exposes FP4/FP8 only) */
-  flopsTflops: number | null;
-  /** VRAM in GB */
-  vramGb: number;
-  /** NVLink bandwidth per GPU in GB/s (0 if no NVLink) */
-  nvlinkGbps: number;
-  /** Typical on-demand $/hr in USD (cloud, rough 2025-2026 estimate). null = quote required */
-  usdPerHour: number | null;
-  /** Release year */
-  year: number;
-  /** Special note (e.g. 'FP16 dense not publicly reported', 'rack-scale system', etc.) */
-  note?: string;
-  /** HuggingFace URL or vendor source for verification */
-  sourceUrl?: string;
-}
-
-export const GPUS: GpuSpec[] = [
-  // === NVIDIA Datacenter ===
-  // Refs: https://www.nvidia.com/en-us/data-center/h100 · https://www.nvidia.com/en-us/data-center/h200 · https://www.nvidia.com/en-us/data-center/b200
-  { id: "h100-sxm",  name: "H100 SXM5 80GB",    vendor: "NVIDIA", category: "datacenter", memBandwidthGbps: 3350, flopsTflops: 990,  vramGb: 80,  nvlinkGbps: 900, usdPerHour: 2.50, year: 2022, sourceUrl: "https://www.nvidia.com/en-us/data-center/h100" },
-  { id: "h100-pcie", name: "H100 PCIe 80GB",    vendor: "NVIDIA", category: "datacenter", memBandwidthGbps: 2000, flopsTflops: 756,  vramGb: 80,  nvlinkGbps: 0,   usdPerHour: 2.00, year: 2023, sourceUrl: "https://www.nvidia.com/en-us/data-center/h100" },
-  { id: "h200-sxm",  name: "H200 SXM5 141GB",   vendor: "NVIDIA", category: "datacenter", memBandwidthGbps: 4800, flopsTflops: 990,  vramGb: 141, nvlinkGbps: 900, usdPerHour: 4.00, year: 2024, sourceUrl: "https://www.nvidia.com/en-us/data-center/h200" },
-  // B200: NVIDIA publishes FP4/FP8 but not dense FP16 — set to null per research guidance.
-  { id: "b200-sxm",  name: "B200 SXM 192GB",    vendor: "NVIDIA", category: "datacenter", memBandwidthGbps: 8000, flopsTflops: null, vramGb: 192, nvlinkGbps: 1800,usdPerHour: 6.00, year: 2025, note: "FP4/FP8 specs only; FP16 dense not publicly reported", sourceUrl: "https://www.nvidia.com/en-us/data-center/blackwell-architecture" },
-  // B300 (2025) — announced/limited availability. Specs subject to change.
-  { id: "b300-sxm",  name: "B300 SXM 288GB",    vendor: "NVIDIA", category: "datacenter", memBandwidthGbps: 8000, flopsTflops: null, vramGb: 288, nvlinkGbps: 1800,usdPerHour: 8.00, year: 2025, note: "Announced; FP16 dense not published", sourceUrl: "https://www.nvidia.com/en-us/data-center/dgx-b300" },
-  { id: "a100-80",  name: "A100 80GB SXM4",     vendor: "NVIDIA", category: "datacenter", memBandwidthGbps: 2000, flopsTflops: 312,  vramGb: 80,  nvlinkGbps: 600, usdPerHour: 1.20, year: 2020, sourceUrl: "https://www.nvidia.com/en-us/data-center/a100" },
-  { id: "a100-40",  name: "A100 40GB SXM4",     vendor: "NVIDIA", category: "datacenter", memBandwidthGbps: 1550, flopsTflops: 312,  vramGb: 40,  nvlinkGbps: 600, usdPerHour: 0.90, year: 2020, sourceUrl: "https://www.nvidia.com/en-us/data-center/a100" },
-  { id: "l40s",     name: "L40S 48GB",          vendor: "NVIDIA", category: "datacenter", memBandwidthGbps: 864,  flopsTflops: 91.6, vramGb: 48,  nvlinkGbps: 0,   usdPerHour: 0.70, year: 2023, sourceUrl: "https://www.nvidia.com/en-us/data-center/l40s" },
-  { id: "a10g",     name: "A10G 24GB",          vendor: "NVIDIA", category: "datacenter", memBandwidthGbps: 600,  flopsTflops: 31,   vramGb: 24,  nvlinkGbps: 0,   usdPerHour: 0.36, year: 2021 },
-  { id: "t4",       name: "T4 16GB",            vendor: "NVIDIA", category: "datacenter", memBandwidthGbps: 320,  flopsTflops: 8.1,  vramGb: 16,  nvlinkGbps: 0,   usdPerHour: 0.20, year: 2018 },
-  // V100 — legacy but still in production for some workloads
-  { id: "v100",     name: "V100 SXM2 32GB",     vendor: "NVIDIA", category: "legacy",    memBandwidthGbps: 900,  flopsTflops: 125,  vramGb: 32,  nvlinkGbps: 300, usdPerHour: 0.50, year: 2017, note: "Legacy architecture (Volta)" },
-
-  // === NVIDIA Workstation (Blackwell + Ada) ===
-  { id: "l4",       name: "L4 24GB",            vendor: "NVIDIA", category: "workstation", memBandwidthGbps: 300,  flopsTflops: 30.3, vramGb: 24,  nvlinkGbps: 0,   usdPerHour: 0.40, year: 2023 },
-  { id: "rtx-6000a",name: "RTX 6000 Ada 48GB", vendor: "NVIDIA", category: "workstation", memBandwidthGbps: 960,  flopsTflops: 91.6, vramGb: 48,  nvlinkGbps: 0,   usdPerHour: 0.80, year: 2022 },
-  // RTX PRO 6000 Blackwell — 96GB VRAM, 2025 release
-  { id: "rtx-pro-6000-bw", name: "RTX PRO 6000 Blackwell 96GB", vendor: "NVIDIA", category: "workstation", memBandwidthGbps: 1792, flopsTflops: 125, vramGb: 96, nvlinkGbps: 0, usdPerHour: 1.50, year: 2025, sourceUrl: "https://www.nvidia.com/en-us/products/workstations/professional-desktop-gpus/rtx-pro-6000-family" },
-  { id: "a4000",    name: "RTX A4000 16GB",     vendor: "NVIDIA", category: "workstation", memBandwidthGbps: 448,  flopsTflops: 19.5, vramGb: 16,  nvlinkGbps: 0,   usdPerHour: 0.30, year: 2021 },
-
-  // === NVIDIA Consumer (Blackwell + Ada + Ampere) ===
-  { id: "rtx-5090", name: "RTX 5090 32GB",      vendor: "NVIDIA", category: "consumer", memBandwidthGbps: 1792, flopsTflops: 105,  vramGb: 32,  nvlinkGbps: 0,   usdPerHour: 0.50, year: 2025, sourceUrl: "https://www.nvidia.com/en-us/geforce/graphics-cards/50-series" },
-  { id: "rtx-4090", name: "RTX 4090 24GB",      vendor: "NVIDIA", category: "consumer", memBandwidthGbps: 1008, flopsTflops: 82.6, vramGb: 24,  nvlinkGbps: 0,   usdPerHour: 0.40, year: 2022 },
-  { id: "rtx-3090", name: "RTX 3090 24GB",      vendor: "NVIDIA", category: "consumer", memBandwidthGbps: 936,  flopsTflops: 35.6, vramGb: 24,  nvlinkGbps: 0,   usdPerHour: 0.25, year: 2020 },
-  { id: "rtx-4080", name: "RTX 4080 16GB",      vendor: "NVIDIA", category: "consumer", memBandwidthGbps: 717,  flopsTflops: 48.7, vramGb: 16,  nvlinkGbps: 0,   usdPerHour: 0.30, year: 2022 },
-  { id: "rtx-3080", name: "RTX 3080 10GB",      vendor: "NVIDIA", category: "consumer", memBandwidthGbps: 760,  flopsTflops: 34.1, vramGb: 10,  nvlinkGbps: 0,   usdPerHour: 0.20, year: 2020 },
-
-  // === AMD Instinct (ROCm) ===
-  // Refs: https://www.amd.com/en/products/accelerators/instinct/mi300/mi300x.html
-  { id: "mi300x",    name: "AMD MI300X 192GB",     vendor: "AMD", category: "datacenter", memBandwidthGbps: 5300, flopsTflops: 1307, vramGb: 192, nvlinkGbps: 0,   usdPerHour: 2.50, year: 2023, note: "ROCm; performance depends on ROCm version", sourceUrl: "https://www.amd.com/en/products/accelerators/instinct/mi300/mi300x.html" },
-  { id: "mi325x",   name: "AMD MI325X 288GB",    vendor: "AMD", category: "datacenter", memBandwidthGbps: 6000, flopsTflops: 1307, vramGb: 288, nvlinkGbps: 0,   usdPerHour: 3.50, year: 2024, sourceUrl: "https://www.amd.com/en/products/accelerators/instinct.html" },
-
-  // === Intel Gaudi ===
-  // Refs: https://www.intel.com/content/www/us/en/products/details/processors/ai-accelerators/gaudi.html
-  { id: "gaudi3",    name: "Intel Gaudi 3 128GB",  vendor: "Intel", category: "datacenter", memBandwidthGbps: 3300, flopsTflops: 1835, vramGb: 128, nvlinkGbps: 0,   usdPerHour: 2.00, year: 2024, note: "Ethernet scale-out; not drop-in for CUDA", sourceUrl: "https://www.intel.com/content/www/us/en/products/details/processors/ai-accelerators/gaudi.html" },
-
-  // === Google TPU (separate schema, but in same DB for convenience) ===
-  // Refs: https://cloud.google.com/tpu/docs
-  { id: "tpu-v5p",    name: "TPU v5p (per-chip, 95GB)",   vendor: "Google", category: "tpu", memBandwidthGbps: 819, flopsTflops: 459, vramGb: 95, nvlinkGbps: 0, usdPerHour: 4.20, year: 2023, note: "Pod-scale; per-chip specs only", sourceUrl: "https://cloud.google.com/tpu/docs" },
-  { id: "tpu-trillium", name: "TPU v6e Trillium (32GB)", vendor: "Google", category: "tpu", memBandwidthGbps: 819, flopsTflops: 918, vramGb: 32, nvlinkGbps: 0, usdPerHour: 0.80, year: 2024, sourceUrl: "https://cloud.google.com/tpu/docs" },
-
-  // === Groq LPU (special — designed for LLM inference, no FLOPS-comparable metric) ===
-  // Refs: https://groq.com — listed as 'lpu' category; user can use 'continuous batching' multiplier on top
-  { id: "groq-lpu",   name: "GroqLPU (per-chip, 230MB SRAM)", vendor: "Groq", category: "lpu", memBandwidthGbps: 9000, flopsTflops: 750, vramGb: 0.23, nvlinkGbps: 0, usdPerHour: null, year: 2024, note: "LPU architecture; SRAM-based, very different from HBM GPUs. Use cited model-specific benchmarks.", sourceUrl: "https://groq.com" },
-
-  // === Cerebras CS-3 (wafer-scale) ===
-  // Refs: https://www.cerebras.ai
-  { id: "cerebras-cs3", name: "Cerebras CS-3 (WSE-3)",  vendor: "Cerebras", category: "wse", memBandwidthGbps: 20000, flopsTflops: 1250, vramGb: 44, nvlinkGbps: 0, usdPerHour: null, year: 2024, note: "Wafer-scale; not comparable to per-GPU specs. Use cited benchmarks.", sourceUrl: "https://www.cerebras.ai" },
-
-  // === Apple Silicon (unified memory) ===
-  // Refs: https://www.apple.com/newsroom/2023/06/apple-unveils-m2-ultra/
-  { id: "m2u-800",  name: "Mac M2 Ultra (192GB unified)", vendor: "Apple", category: "mac", memBandwidthGbps: 800, flopsTflops: 27.0, vramGb: 192, nvlinkGbps: 0, usdPerHour: 0.0, year: 2023, note: "Unified memory; purchased hardware, not rentable. Legacy id 'm2u-800' refers to the 800 GB/s memory bandwidth, not VRAM." },
-  { id: "m2u-192",  name: "Mac M2 Ultra (192GB)",  vendor: "Apple", category: "mac", memBandwidthGbps: 800, flopsTflops: 27.0, vramGb: 192, nvlinkGbps: 0, usdPerHour: 0.0, year: 2023, note: "Unified memory" },
-  { id: "m3max-64", name: "Mac M3 Max (64GB)",    vendor: "Apple", category: "mac", memBandwidthGbps: 400, flopsTflops: 14.0, vramGb: 64,  nvlinkGbps: 0, usdPerHour: 0.0, year: 2023, note: "Unified memory" },
-  { id: "m4max-128",name: "Mac M4 Max (128GB)",  vendor: "Apple", category: "mac", memBandwidthGbps: 546, flopsTflops: 17.0, vramGb: 128, nvlinkGbps: 0, usdPerHour: 0.0, year: 2024, note: "Unified memory" },
-];
-
-export const GPU_MAP: Record<string, GpuSpec> = Object.fromEntries(GPUS.map((g) => [g.id, g]));
-
-export type ModelCategory = "text" | "vlm" | "embedding" | "code" | "reasoning";
-
-export interface ModelSpec {
-  id: string;
-  name: string;
-  family: string;
-  /** Workload category — text, vision-language, embedding, code, or reasoning */
-  category: ModelCategory;
-  /** total params in billions */
-  paramsB: number;
-  /** active params in billions (for MoE; = paramsB for dense) */
-  activeParamsB: number;
-  /** number of transformer layers */
-  layers: number;
-  /** hidden dimension */
-  hiddenDim: number;
-  /** query heads */
-  qHeads: number;
-  /** kv heads (for GQA) */
-  kvHeads: number;
-  /** head dimension */
-  headDim: number;
-  /** vocab size */
-  vocabSize: number;
-  /** default max context */
-  maxContext: number;
-  /** is MoE */
-  isMoE: boolean;
-}
-
-export const MODELS: ModelSpec[] = [
-  // === Llama family ===
-  { id: "llama3-8b",   name: "Llama 3 8B",          family: "Llama",   category: "text",      paramsB: 8.03, activeParamsB: 8.03,  layers: 32, hiddenDim: 4096,  qHeads: 32, kvHeads: 8,  headDim: 128, vocabSize: 128256, maxContext: 8192,   isMoE: false },
-  { id: "llama3-70b",  name: "Llama 3 70B",         family: "Llama",   category: "text",      paramsB: 70.6, activeParamsB: 70.6,  layers: 80, hiddenDim: 8192,  qHeads: 64, kvHeads: 8,  headDim: 128, vocabSize: 128256, maxContext: 8192,   isMoE: false },
-  { id: "llama3-405b", name: "Llama 3.1 405B",      family: "Llama",   category: "text",      paramsB: 405,  activeParamsB: 405,   layers: 126,hiddenDim: 16384, qHeads: 128,kvHeads: 8,  headDim: 128, vocabSize: 128256, maxContext: 131072, isMoE: false },
-  { id: "llama3-3-70b",name: "Llama 3.3 70B",      family: "Llama",   category: "text",      paramsB: 70.6, activeParamsB: 70.6,  layers: 80, hiddenDim: 8192,  qHeads: 64, kvHeads: 8,  headDim: 128, vocabSize: 128256, maxContext: 131072, isMoE: false },
-  { id: "llama2-7b",   name: "Llama 2 7B",          family: "Llama",   category: "text",      paramsB: 6.74, activeParamsB: 6.74, layers: 32, hiddenDim: 4096,  qHeads: 32, kvHeads: 32, headDim: 128, vocabSize: 32000, maxContext: 4096,  isMoE: false },
-  // Llama 4 — open-weight multimodal MoE (2025-04). Exact architecture fields not fully published
-  // for all variants; we use Meta's release figures for total/active params per official blog.
-  // Refs: https://huggingface.co/meta-llama/Llama-4-Scout-17B-16E-Instruct
-  { id: "llama4-scout", name: "Llama 4 Scout 17B-16E (MoE, VLM)",    family: "Llama", category: "vlm",       paramsB: 109,  activeParamsB: 17,   layers: 48, hiddenDim: 5120,  qHeads: 40, kvHeads: 8,  headDim: 128, vocabSize: 202000, maxContext: 10000000, isMoE: true  },
-  { id: "llama4-maverick", name: "Llama 4 Maverick 17B-128E (MoE, VLM)", family: "Llama", category: "vlm",   paramsB: 400,  activeParamsB: 17,   layers: 48, hiddenDim: 5120,  qHeads: 40, kvHeads: 8,  headDim: 128, vocabSize: 202000, maxContext: 1000000, isMoE: true  },
-
-  // === Mistral family ===
-  { id: "mistral-7b", name: "Mistral 7B v0.3",      family: "Mistral", category: "text",      paramsB: 7.24, activeParamsB: 7.24, layers: 32, hiddenDim: 4096,  qHeads: 32, kvHeads: 8,  headDim: 128, vocabSize: 32768, maxContext: 32768,  isMoE: false },
-  { id: "mixtral-8x7b",name: "Mixtral 8x7B (MoE)",  family: "Mistral", category: "text",      paramsB: 46.7, activeParamsB: 12.9, layers: 32, hiddenDim: 4096,  qHeads: 32, kvHeads: 8,  headDim: 128, vocabSize: 32000, maxContext: 32768,  isMoE: true  },
-  { id: "mixtral-8x22b",name:"Mixtral 8x22B (MoE)", family: "Mistral", category: "text",      paramsB: 141,  activeParamsB: 39,   layers: 56, hiddenDim: 6144,  qHeads: 48, kvHeads: 8,  headDim: 128, vocabSize: 32000, maxContext: 65536,  isMoE: true  },
-  // Mistral Large 3 (2025-12) — open-weight MoE, 256K context. Refs: https://docs.mistral.ai/models/mistral-large-3-25-12
-  { id: "mistral-large-3", name: "Mistral Large 3 (256K)", family: "Mistral", category: "text", paramsB: 235, activeParamsB: 71,  layers: 78, hiddenDim: 7168,  qHeads: 56, kvHeads: 8,  headDim: 128, vocabSize: 131072, maxContext: 262144, isMoE: true  },
-  { id: "pixtral-12b", name: "Pixtral 12B (VLM)",   family: "Mistral", category: "vlm",       paramsB: 12,   activeParamsB: 12,   layers: 40, hiddenDim: 5120,  qHeads: 32, kvHeads: 8,  headDim: 128, vocabSize: 131072, maxContext: 131072, isMoE: false },
-  { id: "codestral-25", name: "Codestral 25.08",    family: "Mistral", category: "code",      paramsB: 22,   activeParamsB: 22,   layers: 56, hiddenDim: 6144,  qHeads: 48, kvHeads: 8,  headDim: 128, vocabSize: 32768, maxContext: 32768,  isMoE: false },
-
-  // === Qwen family ===
-  { id: "qwen2-7b",   name: "Qwen2 7B",            family: "Qwen",    category: "text",      paramsB: 7.62, activeParamsB: 7.62, layers: 28, hiddenDim: 3584,  qHeads: 28, kvHeads: 4,  headDim: 128, vocabSize: 152064, maxContext: 32768,  isMoE: false },
-  { id: "qwen2-72b",  name: "Qwen2 72B",           family: "Qwen",    category: "text",      paramsB: 72.7, activeParamsB: 72.7, layers: 80, hiddenDim: 8192,  qHeads: 64, kvHeads: 8,  headDim: 128, vocabSize: 152064, maxContext: 32768,  isMoE: false },
-  { id: "qwen2-5-14b",name: "Qwen 2.5 14B",         family: "Qwen",    category: "text",      paramsB: 14.0, activeParamsB: 14.0, layers: 48, hiddenDim: 5120,  qHeads: 40, kvHeads: 8,  headDim: 128, vocabSize: 152064, maxContext: 131072, isMoE: false },
-  { id: "qwen2-5-72b",name: "Qwen 2.5 72B",        family: "Qwen",    category: "text",      paramsB: 72.7, activeParamsB: 72.7, layers: 80, hiddenDim: 8192,  qHeads: 64, kvHeads: 8,  headDim: 128, vocabSize: 152064, maxContext: 131072, isMoE: false },
-  // Qwen 3 family (2025-04). Refs: https://huggingface.co/Qwen
-  { id: "qwen3-4b",   name: "Qwen 3 4B",            family: "Qwen",    category: "text",      paramsB: 4.0,  activeParamsB: 4.0,  layers: 36, hiddenDim: 2560,  qHeads: 32, kvHeads: 8,  headDim: 128, vocabSize: 151936, maxContext: 40960,  isMoE: false },
-  { id: "qwen3-8b",   name: "Qwen 3 8B",            family: "Qwen",    category: "text",      paramsB: 8.0,  activeParamsB: 8.0,  layers: 36, hiddenDim: 4096,  qHeads: 32, kvHeads: 8,  headDim: 128, vocabSize: 151936, maxContext: 40960,  isMoE: false },
-  { id: "qwen3-14b",  name: "Qwen 3 14B",           family: "Qwen",    category: "text",      paramsB: 14.0, activeParamsB: 14.0, layers: 40, hiddenDim: 5120,  qHeads: 40, kvHeads: 8,  headDim: 128, vocabSize: 151936, maxContext: 40960,  isMoE: false },
-  { id: "qwen3-32b",  name: "Qwen 3 32B",           family: "Qwen",    category: "text",      paramsB: 32.0, activeParamsB: 32.0, layers: 64, hiddenDim: 5120,  qHeads: 64, kvHeads: 8,  headDim: 128, vocabSize: 151936, maxContext: 40960,  isMoE: false },
-  { id: "qwen3-30b-a3b", name: "Qwen 3 30B-A3B (MoE)", family: "Qwen", category: "text",      paramsB: 30.0, activeParamsB: 3.0,  layers: 48, hiddenDim: 2048,  qHeads: 32, kvHeads: 4,  headDim: 128, vocabSize: 151936, maxContext: 40960,  isMoE: true  },
-  { id: "qwen3-235b-a22b", name: "Qwen 3 235B-A22B (MoE)", family: "Qwen", category: "text", paramsB: 235,  activeParamsB: 22,   layers: 94, hiddenDim: 4096,  qHeads: 64, kvHeads: 4,  headDim: 128, vocabSize: 151936, maxContext: 40960,  isMoE: true  },
-  { id: "qwen2-5-vl-7b",  name: "Qwen 2.5-VL 7B (VLM)",   family: "Qwen", category: "vlm",  paramsB: 7.0,  activeParamsB: 7.0,  layers: 28, hiddenDim: 3584,  qHeads: 28, kvHeads: 4,  headDim: 128, vocabSize: 152064, maxContext: 128000, isMoE: false },
-  { id: "qwen2-5-vl-72b", name: "Qwen 2.5-VL 72B (VLM)",  family: "Qwen", category: "vlm",  paramsB: 72.0, activeParamsB: 72.0, layers: 80, hiddenDim: 8192,  qHeads: 64, kvHeads: 8,  headDim: 128, vocabSize: 152064, maxContext: 128000, isMoE: false },
-
-  // === DeepSeek family ===
-  { id: "deepseek-v3",name: "DeepSeek V3 671B (MoE)",family:"DeepSeek",category:"text",     paramsB: 671,  activeParamsB: 37,   layers: 61, hiddenDim: 7168,  qHeads: 128,kvHeads: 128,headDim: 128, vocabSize: 102400, maxContext: 65536,  isMoE: true  },
-  { id: "deepseek-r1",name: "DeepSeek R1 671B (MoE)",family:"DeepSeek",category:"reasoning", paramsB: 671,  activeParamsB: 37,   layers: 61, hiddenDim: 7168,  qHeads: 128,kvHeads: 128,headDim: 128, vocabSize: 102400, maxContext: 65536,  isMoE: true  },
-  { id: "deepseek-coder-v2", name: "DeepSeek Coder V2 236B (MoE)", family:"DeepSeek", category:"code", paramsB: 236, activeParamsB: 21, layers: 47, hiddenDim: 6144, qHeads: 64, kvHeads: 8,  headDim: 128, vocabSize: 102400, maxContext: 131072, isMoE: true  },
-
-  // === Google Gemma ===
-  { id: "gemma2-9b", name: "Gemma 2 9B",           family: "Gemma",   category: "text",      paramsB: 9.0,  activeParamsB: 9.0,  layers: 42, hiddenDim: 3584,  qHeads: 16, kvHeads: 8,  headDim: 256, vocabSize: 256000, maxContext: 8192,   isMoE: false },
-  { id: "gemma2-27b", name: "Gemma 2 27B",         family: "Gemma",   category: "text",      paramsB: 27.0, activeParamsB: 27.0, layers: 46, hiddenDim: 4608,  qHeads: 32, kvHeads: 16, headDim: 128, vocabSize: 256000, maxContext: 8192,   isMoE: false },
-
-  // === Microsoft Phi ===
-  { id: "phi3-7b",    name: "Phi-3 Mini 3.8B",     family: "Phi",     category: "text",      paramsB: 3.8,  activeParamsB: 3.8,   layers: 32, hiddenDim: 3072,  qHeads: 32, kvHeads: 32, headDim: 96,  vocabSize: 32000, maxContext: 4096,   isMoE: false },
-  { id: "phi4-14b",   name: "Phi-4 14B",            family: "Phi",     category: "text",      paramsB: 14.0, activeParamsB: 14.0, layers: 40, hiddenDim: 5120,  qHeads: 32, kvHeads: 8,  headDim: 128, vocabSize: 100352, maxContext: 16384,  isMoE: false },
-
-  // === Small / open research ===
-  { id: "smollm2-1.7b",name: "SmolLM2 1.7B Instruct", family: "HuggingFaceTB", category: "text", paramsB: 1.7, activeParamsB: 1.7, layers: 24, hiddenDim: 2048, qHeads: 32, kvHeads: 32, headDim: 64,  vocabSize: 128256, maxContext: 8192,   isMoE: false },
-  { id: "falcon3-10b",name: "Falcon 3 10B Instruct", family: "TII",     category: "text",      paramsB: 10.0, activeParamsB: 10.0, layers: 40, hiddenDim: 4096,  qHeads: 32, kvHeads: 8,  headDim: 128, vocabSize: 49152, maxContext: 32768,  isMoE: false },
-  { id: "olmo2-13b", name: "OLMo 2 13B",            family: "AllenAI",  category: "text",      paramsB: 13.0, activeParamsB: 13.0, layers: 40, hiddenDim: 5120,  qHeads: 40, kvHeads: 8,  headDim: 128, vocabSize: 50281, maxContext: 4096,   isMoE: false },
-  { id: "gpt-neox-20b",name:"GPT-NeoX 20B",         family:"EleutherAI",category: "text",     paramsB: 20.0, activeParamsB: 20.0, layers: 44, hiddenDim: 6144,  qHeads: 64, kvHeads: 64, headDim: 96,  vocabSize: 50432, maxContext: 2048,   isMoE: false },
-
-  // === Embedding models (separate workload — encoder, not autoregressive) ===
-  // Refs: https://huggingface.co/BAAI/bge-m3 · https://huggingface.co/intfloat/multilingual-e5-large
-  { id: "bge-m3",     name: "BGE-M3 (embed, 1024-dim)",   family: "BAAI",     category: "embedding", paramsB: 0.568, activeParamsB: 0.568, layers: 24, hiddenDim: 1024, qHeads: 16, kvHeads: 16, headDim: 64,  vocabSize: 250002, maxContext: 8192, isMoE: false },
-  { id: "e5-mlarge",  name: "Multilingual E5 Large (1024-dim)", family: "intfloat", category: "embedding", paramsB: 0.56, activeParamsB: 0.56, layers: 24, hiddenDim: 1024, qHeads: 16, kvHeads: 16, headDim: 64, vocabSize: 250047, maxContext: 514, isMoE: false },
-  { id: "gte-large",  name: "GTE Large (1024-dim)",    family: "thenlper", category: "embedding", paramsB: 0.44, activeParamsB: 0.44, layers: 24, hiddenDim: 1024, qHeads: 16, kvHeads: 16, headDim: 64, vocabSize: 30522, maxContext: 512,  isMoE: false },
-];
-
-export const MODEL_MAP: Record<string, ModelSpec> = Object.fromEntries(MODELS.map((m) => [m.id, m]));
+export { MODELS, MODEL_MAP, QUANTIZATIONS, QUANT_MAP };
+export { ACCELERATORS as GPUS, ACCELERATOR_MAP as GPU_MAP };
+export type {
+  AcceleratorRecord,
+  GpuCategory,
+  GpuSpec,
+  ModelCategory,
+  ModelSpec,
+  Quantization,
+  QuantMeta,
+  QuantizationRecord,
+};
 
 /** ---------- EFFICIENCY CONSTANTS ---------- */
 export const ETA_MEM = 0.65;       // Memory bandwidth utilization (real-world)
@@ -254,20 +60,43 @@ export const ETA_NVLINK = 0.85;    // NVLink tensor-parallel communication effic
 export const KERNEL_OVERHEAD_MS = 30; // per-request overhead
 
 /**
+ * How many tokens a streamed answer needs before a human can act on it.
+ *
+ * TTFT reports when the first *character* appears. A user cannot read "#" —
+ * they need a clause. We model "readable" as roughly one short clause, and
+ * state the assumption rather than hiding it inside a formula.
+ */
+export const FIRST_ANSWER_TOKENS = 12;
+
+/**
  * Confidence levels surfaced in the UI to help users trust (or question)
  * specific numbers. The research brief called this "honest uncertainty" —
  * a key credibility signal for technical audiences (HN/Reddit/ML engineers).
  *
- *  - "measured"     → sourced directly from official spec sheets, model cards,
- *                     API pricing pages, or HuggingFace config.json
- *  - "modeled"      → derived from physics-based formulas with cited sources
- *                     (e.g., decode = HBM_BW × η_mem / model_size)
- *  - "inferred"     → derived from heuristics with known error bars
- *                     (e.g., continuous batching multiplier 1.5× default,
- *                     long-context attention O(N²) correction, B200 null FP16 fallback)
- *  - "user-supplied" → user-provided value (e.g., GPU $/hr override)
+ * The older four-value scheme lumped three genuinely different kinds of
+ * evidence under "measured" (a vendor spec sheet, a published price, and a
+ * real observed run) and called a rule of thumb "inferred" — so a reader
+ * could not tell *where* a number came from. The split below is by
+ * provenance, not by how good the number feels:
+ *
+ *  - "official_spec"    → taken from a vendor spec sheet, model card, or
+ *                         HuggingFace config.json / safetensors index.
+ *  - "published_price"  → a published price (cloud GPU $/hr, API token price).
+ *  - "observed_run"     → an actual measurement: a benchmark run, or a
+ *                         reading recorded through `record_measured`.
+ *  - "modeled"          → derived by a physics-based formula with cited
+ *                         sources (e.g. decode = HBM_BW × η_mem / model_size).
+ *  - "heuristic"        → derived by a rule of thumb with known error bars
+ *                         (e.g. continuous-batching multiplier 1.5×).
+ *  - "user_supplied"    → the user typed it in (e.g. GPU $/hr override).
  */
-export type Confidence = "measured" | "modeled" | "inferred" | "user-supplied";
+export type Confidence =
+  | "official_spec"
+  | "published_price"
+  | "observed_run"
+  | "modeled"
+  | "heuristic"
+  | "user_supplied";
 
 /**
  * Map of metric name → confidence level.
@@ -338,6 +167,11 @@ export interface CalcResult {
   isMoE: boolean;
   kvCachePerTokenKb: number;
   kvCacheTotalGb: number;
+  /**
+   * Fixed recurrent state (linear/KDA layers) in GB, for the whole batch.
+   * Zero for ordinary full-attention models. This does NOT grow with context.
+   */
+  stateBytesGb: number;
   totalVramNeededGb: number;
   vramFits: boolean;
 
@@ -348,13 +182,19 @@ export interface CalcResult {
   batchCrossover: number;          // batch size where compute becomes bound
 
   // ---- Latency (new: split into TTFT + ITL) ----
-  prefillTimeMs: number;           // = TTFT (time-to-first-token)
+  prefillTimeMs: number;           // time to read the prompt (prefill phase)
   decodeTimePerTokenMs: number;    // = ITL (inter-token latency)
   totalDecodeTimeMs: number;
   totalLatencyMs: number;
   endToEndTokensPerSec: number;    // output / total time
-  ttftMs: number;                  // alias for prefillTimeMs — for clarity
+  ttftMs: number;                  // = prefill + first decode step + overhead
   itlMs: number;                   // alias for decodeTimePerTokenMs — for clarity
+  /**
+   * Time until the answer is READABLE, not merely started.
+   * = prefill + FIRST_ANSWER_TOKENS × ITL + overhead. Usually several times
+   * ttftMs — this is the number an SLO should be written against.
+   */
+  firstAnswerLatencyMs: number;
 
   // ---- Reasoning ----
   billedOutputTokens: number;     // visible + hidden reasoning tokens
@@ -403,7 +243,7 @@ export interface CalcResult {
  */
 export function calculate(input: CalcInput): CalcResult {
   const model = MODEL_MAP[input.modelId];
-  const gpu = GPU_MAP[input.gpuId];
+  const gpu = ACCELERATOR_MAP[input.gpuId];
   const quant = QUANT_MAP[input.quantization];
 
   if (!model) throw new Error(`Unknown model: ${input.modelId}`);
@@ -448,14 +288,21 @@ export function calculate(input: CalcInput): CalcResult {
   const gpuFlops = gpu.flopsTflops ?? 1500;  // conservative fallback if null
   const effectiveFlopsTflops = gpuFlops * tp * effCompute;
 
-  // ---- KV cache ----
-  // KV cache per token = 2 (K&V) × layers × kvHeads × headDim × 2 bytes (FP16)
-  const kvBytesPerToken = 2 * model.layers * model.kvHeads * model.headDim * 2;
-  const kvCachePerTokenKb = kvBytesPerToken / 1024;
-  // KV cache size depends on total context (prefix + suffix) × batch
+  // ---- KV cache / recurrent state ----
+  // For a plain full-attention model: 2 (K&V) × layers × kvHeads × headDim × 2 bytes.
+  // For a model with a declared attention layout, each layer is costed by its
+  // own kind (sliding windows saturate, linear/KDA layers hold a fixed
+  // recurrent state instead of a growing cache, MLA stores a compressed
+  // latent). See computeKVBytesPerToken / computeStateBytes.
   const totalContextTokens = input.promptTokens + (input.cachePrefixTokens ?? 0);
+  const kvBytesPerToken = computeKVBytesPerToken(model, 2, totalContextTokens);
+  const kvCachePerTokenKb = kvBytesPerToken / 1024;
+  const stateBytes = computeStateBytes(model);
+  // KV cache grows with total context × batch; recurrent state is per request.
   const kvCacheTotalGb =
-    (kvBytesPerToken * totalContextTokens * input.batchSize) / 1e9;
+    (kvBytesPerToken * totalContextTokens * input.batchSize +
+      stateBytes * input.batchSize) /
+    1e9;
 
   // ---- Total VRAM ----
   const totalVramNeededGb = residentWeightsGb + kvCacheTotalGb;
@@ -523,6 +370,20 @@ export function calculate(input: CalcInput): CalcResult {
     : 0;
   const decodeTimePerTokenMs = decodeTokensPerSec > 0 ? (1000 / decodeTokensPerSec) : Infinity;
 
+  // TTFT is NOT the same as prefill time. The first token only exists after
+  // the prompt has been read AND one decode step has run, plus the per-request
+  // scheduling overhead. Reporting prefill alone understates TTFT by
+  // (itl + overhead) — which is the gap that makes a "sub-100 ms TTFT" claim
+  // look better than the user will actually experience.
+  const ttftMs = prefillTimeMs + decodeTimePerTokenMs + KERNEL_OVERHEAD_MS;
+
+  // ---- First-answer latency ----
+  // TTFT says when the first *character* appears; the user needs a clause
+  // before they can act. Modelled explicitly so an SLO written against
+  // "first answer" is not silently satisfied by a fast first token.
+  const firstAnswerLatencyMs =
+    prefillTimeMs + FIRST_ANSWER_TOKENS * decodeTimePerTokenMs + KERNEL_OVERHEAD_MS;
+
   // ---- Reasoning tokens (billed as output but invisible to user) ----
   const reasoningTokens = input.reasoningTokens ?? 0;
   const billedOutputTokens = input.outputTokens + reasoningTokens;
@@ -557,6 +418,7 @@ export function calculate(input: CalcInput): CalcResult {
     isMoE: model.isMoE,
     kvCachePerTokenKb,
     kvCacheTotalGb,
+    stateBytesGb: (stateBytes * input.batchSize) / 1e9,
     totalVramNeededGb,
     vramFits,
     decodeTokensPerSec,
@@ -568,8 +430,9 @@ export function calculate(input: CalcInput): CalcResult {
     totalDecodeTimeMs,
     totalLatencyMs,
     endToEndTokensPerSec,
-    ttftMs: prefillTimeMs,
+    ttftMs,
     itlMs: decodeTimePerTokenMs,
+    firstAnswerLatencyMs,
     billedOutputTokens,
     cacheHitRate,
     cachePrefixTokens,
@@ -596,19 +459,20 @@ export function calculate(input: CalcInput): CalcResult {
     confidence: {
       // Throughput metrics
       decodeTokensPerSec: "modeled",        // Formula: HBM_BW × η_mem × quant_eff / model_size
-      aggregateTokensPerSec: continuousBatchingMultiplier > 1 ? "inferred" : "modeled",
+      aggregateTokensPerSec: continuousBatchingMultiplier > 1 ? "heuristic" : "modeled",
                                             // Multiplier is heuristic, default 1.5× with cited 2-4× range
-      prefillTokensPerSec: totalContextTokens > 32768 ? "inferred" : "modeled",
+      prefillTokensPerSec: totalContextTokens > 32768 ? "heuristic" : "modeled",
                                             // Long-context superlinear attention is approximation
       batchCrossover: "modeled",           // Crossover formula is exact
 
       // Latency metrics
-      prefillTimeMs: totalContextTokens > 32768 ? "inferred" : "modeled",
+      prefillTimeMs: totalContextTokens > 32768 ? "heuristic" : "modeled",
       decodeTimePerTokenMs: "modeled",     // = 1000 / decode_tok_per_sec
-      totalLatencyMs: totalContextTokens > 32768 ? "inferred" : "modeled",
+      totalLatencyMs: totalContextTokens > 32768 ? "heuristic" : "modeled",
                                             // Inherits from prefill (long context dominates)
-      ttftMs: totalContextTokens > 32768 ? "inferred" : "modeled",
+      ttftMs: totalContextTokens > 32768 ? "heuristic" : "modeled",
       itlMs: "modeled",
+      firstAnswerLatencyMs: "modeled",   // TTFT + N × ITL; the token count is a stated assumption
 
       // Memory metrics
       modelSizeGb: "modeled",              // params × bytes_per_param
@@ -617,22 +481,22 @@ export function calculate(input: CalcInput): CalcResult {
       vramFits: "modeled",
 
       // Cost metrics
-      costPerHour: input.gpuHourlyCost !== undefined ? "user-supplied" : "measured",
-                                            // User override or default from spec
+      costPerHour: input.gpuHourlyCost !== undefined ? "user_supplied" : "published_price",
+                                            // User override or default cloud price list
       costPerMillionOutputTokens: "modeled",
       costPerRequest: "modeled",
 
       // Cache metrics
       cacheSavingsPct: "modeled",
       prefillTokensAvoided: "modeled",
-      cacheWriteCostMultiplier: "measured",  // From Anthropic/OpenAI official docs
-      cacheReadCostMultiplier: "measured",
+      cacheWriteCostMultiplier: "published_price",  // From Anthropic/OpenAI published pricing docs
+      cacheReadCostMultiplier: "published_price",
 
       // Other
-      billedOutputTokens: "user-supplied",  // User sets reasoning tokens
-      effectiveBandwidthGbps: "measured",   // GPU spec × user-multipliers
-      effectiveFlopsTflops: gpu.flopsTflops === null ? "inferred" : "measured",
-                                            // B200/B300 null → conservative fallback
+      billedOutputTokens: "user_supplied",  // User sets reasoning tokens
+      effectiveBandwidthGbps: "modeled",   // GPU spec × utilization constants
+      effectiveFlopsTflops: gpu.flopsTflops === null ? "heuristic" : "modeled",
+                                            // B200/B300 publish no dense FP16 → conservative fallback
     },
   };
 }
@@ -650,6 +514,21 @@ export function fmtBytes(gb: number): string {
   if (gb >= 1024) return (gb / 1024).toFixed(2) + " TB";
   if (gb >= 1) return gb.toFixed(2) + " GB";
   return (gb * 1024).toFixed(1) + " MB";
+}
+
+/**
+ * Format a byte quantity that is expressed in KILOBYTES.
+ *
+ * `fmtBytes` takes GIGABYTES. Feeding it KB (or KB/1024) and reading the
+ * "MB" it prints back is a 1024x error: a 131.2 KB/token KV cache would be
+ * reported as "131.2 MB/token", contradicting the "67.1 MB" total shown
+ * right next to it. Use this for any per-token rate.
+ */
+export function fmtKb(kb: number): string {
+  if (!isFinite(kb)) return "—";
+  if (kb >= 1024 * 1024) return (kb / 1024 / 1024).toFixed(2) + " GB";
+  if (kb >= 1024) return (kb / 1024).toFixed(2) + " MB";
+  return kb.toFixed(1) + " KB";
 }
 
 export function fmtMs(ms: number): string {
@@ -684,23 +563,108 @@ export function fmtMoney(n: number): string {
    Refs: RingAttention paper (https://arxiv.org/abs/2310.01889)
 */
 
-/** Bytes of KV cache per single token (for one request, one head). */
+/**
+ * Bytes of KV cache per single token (for one request).
+ *
+ * For a plain full-attention model this is the classic formula:
+ *   2 (K and V) × layers × kvHeads × headDim × bytesPerKVValue
+ *
+ * When the model declares an attention layout, each layer is costed by its own
+ * kind:
+ *   full     linear in context
+ *   sliding  linear in context up to the window, then FLAT — the cache holds
+ *            at most `windowTokens` entries, so a 128K request on a 128-token
+ *            sliding layer costs the same as a 128-token one
+ *   mla      one compressed latent (kvLoraRank) + a decoupled RoPE key
+ *   linear   no per-token cache at all (see `computeStateBytes`)
+ *   kda      no per-token cache at all (see `computeStateBytes`)
+ *
+ * `contextTokens` is required for sliding layers because their cost depends
+ * on it. It is optional everywhere else and defaults to 0, which means "no
+ * sliding discount" — the safe direction, since it never under-estimates.
+ */
 export function computeKVBytesPerToken(
   model: ModelSpec,
   bytesPerKVValue: number = 2, // FP16 = 2 bytes; can be INT8=1, FP4=0.5
+  contextTokens: number = 0,
 ): number {
-  // 2 = K and V; model.layers = number of transformer blocks
-  return 2 * model.layers * model.kvHeads * model.headDim * bytesPerKVValue;
+  if (!model.attentionLayers) {
+    // 2 = K and V; model.layers = number of transformer blocks
+    return 2 * model.layers * model.kvHeads * model.headDim * bytesPerKVValue;
+  }
+
+  let total = 0;
+  for (const layer of model.attentionLayers) {
+    switch (layer.kind) {
+      case "full":
+        total += 2 * model.kvHeads * model.headDim * bytesPerKVValue;
+        break;
+
+      case "sliding": {
+        const perToken = 2 * model.kvHeads * model.headDim * bytesPerKVValue;
+        const window = layer.windowTokens ?? 0;
+        // The cache saturates at the window size. Below it, cost is linear;
+        // above it, the marginal cost of extra context is zero.
+        if (contextTokens > 0 && window > 0) {
+          total += perToken * Math.min(1, window / contextTokens);
+        } else {
+          total += perToken;
+        }
+        break;
+      }
+
+      case "mla": {
+        // Compressed latent + decoupled RoPE key, both stored once per token.
+        const latent = layer.kvLoraRank ?? model.kvHeads * model.headDim;
+        const rope = layer.mlaRopeHeadDim ?? 0;
+        total += (latent + rope) * bytesPerKVValue;
+        break;
+      }
+
+      case "linear":
+      case "kda":
+        // Recurrent state instead of a KV cache — no per-token cost.
+        break;
+    }
+  }
+  return total;
 }
 
-/** Total KV cache size in GB for `contextTokens` tokens × `batchSize` requests. */
+/**
+ * Fixed recurrent state bytes for ONE sequence (not per token).
+ *
+ * Linear-attention and KDA layers keep a recurrent state matrix per sequence
+ * instead of a growing key/value cache. That state is the same size whether
+ * the sequence is 1K or 1M tokens long, so it is a fixed addition to the
+ * per-request footprint that the old per-token formula could not express.
+ */
+export function computeStateBytes(model: ModelSpec): number {
+  if (!model.attentionLayers) return 0;
+  let total = 0;
+  for (const layer of model.attentionLayers) {
+    if (layer.kind === "linear" || layer.kind === "kda") {
+      total += layer.stateBytes ?? 0;
+    }
+  }
+  return total;
+}
+
+/**
+ * Total KV + recurrent state size in GB for `contextTokens` tokens ×
+ * `batchSize` concurrent requests.
+ *
+ * The state term is per-request, not per-token, so it is multiplied by
+ * batchSize only.
+ */
 export function computeKVCacheGb(
   model: ModelSpec,
   contextTokens: number,
   batchSize: number = 1,
   bytesPerKVValue: number = 2,
 ): number {
-  const bytes = computeKVBytesPerToken(model, bytesPerKVValue) * contextTokens * batchSize;
+  const perToken = computeKVBytesPerToken(model, bytesPerKVValue, contextTokens);
+  const state = computeStateBytes(model);
+  const bytes = perToken * contextTokens * batchSize + state * batchSize;
   return bytes / 1e9;
 }
 
@@ -729,7 +693,12 @@ export function computeMaxConcurrency(
   bytesPerKVValue: number = 2,
 ): number {
   const weightsBytes = model.paramsB * 1e9 * quantBytesPerParam;
-  const kvBytesPerRequest = computeKVBytesPerToken(model, bytesPerKVValue) * contextTokens;
+  // Sliding layers saturate at their window, and linear/KDA layers hold a
+  // fixed per-request state, so the per-request footprint is not simply
+  // "bytes per token × context".
+  const kvBytesPerRequest =
+    computeKVBytesPerToken(model, bytesPerKVValue, contextTokens) * contextTokens +
+    computeStateBytes(model);
   const totalVramBytes = gpu.vramGb * numGpus * 1e9;
   const availableKvBytes = totalVramBytes - weightsBytes;
   if (availableKvBytes <= 0 || kvBytesPerRequest <= 0) return 0;

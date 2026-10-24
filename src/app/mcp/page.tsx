@@ -157,6 +157,7 @@ PORT=8080 tokcalc-mcp-http`;
                 <tr>
                   <th className="text-left px-4 py-2">Tool</th>
                   <th className="text-left px-4 py-2">What it does</th>
+                  <th className="text-left px-4 py-2">Access</th>
                 </tr>
               </thead>
               <tbody>
@@ -164,6 +165,17 @@ PORT=8080 tokcalc-mcp-http`;
                   <tr key={t.name} className="border-t border-border/40">
                     <td className="px-4 py-2 font-mono text-xs font-medium align-top whitespace-nowrap">{t.name}</td>
                     <td className="px-4 py-2 text-xs text-muted-foreground">{t.description}</td>
+                    <td className="px-4 py-2 align-top whitespace-nowrap">
+                      {t.annotations.readOnlyHint ? (
+                        <Badge variant="outline" className="text-[10px] font-normal">
+                          read-only
+                        </Badge>
+                      ) : (
+                        <Badge className="bg-amber-500/15 text-amber-600 dark:text-amber-400 text-[10px] font-normal">
+                          writes state
+                        </Badge>
+                      )}
+                    </td>
                   </tr>
                 ))}
               </tbody>

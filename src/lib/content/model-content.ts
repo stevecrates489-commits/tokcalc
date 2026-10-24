@@ -18,6 +18,9 @@
 
 import {
   calculate,
+  computeKVBytesPerToken,
+  computeStateBytes,
+  fmtKb,
   fmtTokens,
   fmtMoney,
   GPU_MAP,
@@ -404,6 +407,88 @@ function buildFaqs(
 
 /** Every model id that has a page. */
 export const MODEL_PAGE_IDS = MODELS.map((m) => m.id);
+
+/**
+ * Human-readable description of a model's attention layout, and the KV cost
+ * that layout actually produces.
+ *
+ * The old generic formula (2 × layers × kvHeads × headDim) is only right for
+ * a model whose every layer is plain full attention. Qwen3.8 mixes in
+ * linear-attention layers that hold no KV cache at all, gpt-oss alternates
+ * sliding and full layers, and Kimi K3 / GLM-5.3 use compressed latent
+ * attention. So the number has to come from the engine, not from a formula
+ * retyped into a page.
+ */
+export interface AttentionSummary {
+  /** Short label, e.g. "Hybrid: 16 full + 48 linear attention". */
+  label: string;
+  /** One-line explanation of how the cache behaves. */
+  detail: string;
+  /** KV bytes per token at the reference context. */
+  kvPerTokenKb: number;
+  /** Fixed recurrent state per sequence, in GB. Zero for ordinary models. */
+  stateGb: number;
+}
+
+export function attentionSummary(model: ModelSpec): AttentionSummary {
+  const kvPerTokenKb = computeKVBytesPerToken(model, 2, REF_CONTEXT) / 1024;
+  const stateGb = computeStateBytes(model) / 1e9;
+
+  if (!model.attentionLayers) {
+    return {
+      label: "Full attention (GQA)",
+      detail:
+        "Every layer caches keys and values for the whole context, so the KV cache grows linearly with conversation length.",
+      kvPerTokenKb,
+      stateGb,
+    };
+  }
+
+  const counts = new Map<string, number>();
+  for (const l of model.attentionLayers) {
+    counts.set(l.kind, (counts.get(l.kind) ?? 0) + 1);
+  }
+  const parts: string[] = [];
+  const NAMES: Record<string, string> = {
+    full: "full",
+    sliding: "sliding",
+    linear: "linear",
+    kda: "KDA",
+    mla: "MLA",
+  };
+  // Fixed order, so the label reads the same however the layers interleave.
+  for (const kind of ["full", "sliding", "linear", "kda", "mla"]) {
+    const n = counts.get(kind);
+    if (n) parts.push(`${n} ${NAMES[kind]}`);
+  }
+  const label = `Hybrid: ${parts.join(" + ")}`;
+
+  const details: string[] = [];
+  if (counts.has("sliding")) {
+    details.push(
+      "sliding layers stop growing once the context passes their window, so long-context cost is bounded",
+    );
+  }
+  if (counts.has("linear") || counts.has("kda")) {
+    details.push(
+      "linear-attention layers keep a fixed recurrent state instead of a growing key/value cache",
+    );
+  }
+  if (counts.has("mla")) {
+    details.push(
+      "MLA layers store one compressed latent plus a small decoupled RoPE key, not a full key/value pair",
+    );
+  }
+
+  return {
+    label,
+    detail: details.length
+      ? `${details.join("; ")}.`
+      : "Every layer caches keys and values for the whole context.",
+    kvPerTokenKb,
+    stateGb,
+  };
+}
 
 /** Convenience map for fast lookup across the app. */
 export const MODEL_CONTENT_MAP: Record<string, ModelContent> = Object.fromEntries(

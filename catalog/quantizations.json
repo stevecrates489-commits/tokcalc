@@ -1,0 +1,213 @@
+{
+  "records": [
+    {
+      "id": "fp32",
+      "label": "FP32 (raw)",
+      "bytesPerParam": 4,
+      "efficiency": 1,
+      "family": "float",
+      "description": "32-bit float. Highest accuracy, 2x size of FP16.",
+      "lifecycle": "active",
+      "provenance": {
+        "source": "unspecified"
+      }
+    },
+    {
+      "id": "fp16",
+      "label": "FP16",
+      "bytesPerParam": 2,
+      "efficiency": 1,
+      "family": "float",
+      "description": "16-bit float. Standard for inference, no dequant overhead.",
+      "lifecycle": "active",
+      "provenance": {
+        "source": "unspecified"
+      }
+    },
+    {
+      "id": "bf16",
+      "label": "BF16",
+      "bytesPerParam": 2,
+      "efficiency": 1,
+      "family": "float",
+      "description": "Brain Float 16. Same size as FP16, better numerical range.",
+      "lifecycle": "active",
+      "provenance": {
+        "source": "unspecified"
+      }
+    },
+    {
+      "id": "int8",
+      "label": "INT8",
+      "bytesPerParam": 1,
+      "efficiency": 0.88,
+      "family": "float",
+      "description": "8-bit integer. Halves memory, ~12% dequant overhead.",
+      "lifecycle": "active",
+      "provenance": {
+        "source": "unspecified"
+      }
+    },
+    {
+      "id": "int4",
+      "label": "INT4 (generic)",
+      "bytesPerParam": 0.5,
+      "efficiency": 0.8,
+      "family": "float",
+      "description": "4-bit integer (generic). For specific format, pick GPTQ-4 / AWQ-4 / GGUF Q4_K_M.",
+      "lifecycle": "active",
+      "provenance": {
+        "source": "unspecified"
+      }
+    },
+    {
+      "id": "gguf-q2k",
+      "label": "GGUF Q2_K",
+      "bytesPerParam": 0.37,
+      "efficiency": 0.92,
+      "family": "gguf",
+      "description": "~2.6 bpw effective. Smallest; significant accuracy loss, use only as last resort.",
+      "lifecycle": "active",
+      "provenance": {
+        "source": "vendor-spec",
+        "sourceUrl": "https://github.com/ggml-org/llama.cpp/blob/master/tools/quantize/README.md"
+      },
+      "useCase": "Extreme low-memory edge devices"
+    },
+    {
+      "id": "gguf-q3km",
+      "label": "GGUF Q3_K_M",
+      "bytesPerParam": 0.42,
+      "efficiency": 0.93,
+      "family": "gguf",
+      "description": "~3.9 bpw. Low quality; acceptable for some chat uses but not coding/math.",
+      "lifecycle": "active",
+      "provenance": {
+        "source": "vendor-spec",
+        "sourceUrl": "https://github.com/ggml-org/llama.cpp/blob/master/tools/quantize/README.md"
+      },
+      "useCase": "Low-memory local inference"
+    },
+    {
+      "id": "gguf-q4km",
+      "label": "GGUF Q4_K_M",
+      "bytesPerParam": 0.55,
+      "efficiency": 0.9,
+      "family": "gguf",
+      "description": "~4.8 bpw. Recommended sweet spot for local Llama/Mistral on consumer GPUs.",
+      "lifecycle": "active",
+      "provenance": {
+        "source": "vendor-spec",
+        "sourceUrl": "https://github.com/ggml-org/llama.cpp/blob/master/tools/quantize/README.md"
+      },
+      "useCase": "Recommended for local inference"
+    },
+    {
+      "id": "gguf-q5km",
+      "label": "GGUF Q5_K_M",
+      "bytesPerParam": 0.68,
+      "efficiency": 0.92,
+      "family": "gguf",
+      "description": "~5.7 bpw. Higher quality than Q4, ~30% larger. Good when memory allows.",
+      "lifecycle": "active",
+      "provenance": {
+        "source": "vendor-spec",
+        "sourceUrl": "https://github.com/ggml-org/llama.cpp/blob/master/tools/quantize/README.md"
+      },
+      "useCase": "Quality-focused local inference"
+    },
+    {
+      "id": "gguf-q6k",
+      "label": "GGUF Q6_K",
+      "bytesPerParam": 0.82,
+      "efficiency": 0.95,
+      "family": "gguf",
+      "description": "~6.6 bpw. Near-FP16 quality, ~60% larger than Q4_K_M.",
+      "lifecycle": "active",
+      "provenance": {
+        "source": "vendor-spec",
+        "sourceUrl": "https://github.com/ggml-org/llama.cpp/blob/master/tools/quantize/README.md"
+      },
+      "useCase": "Near-lossless local inference"
+    },
+    {
+      "id": "gguf-q8",
+      "label": "GGUF Q8_0",
+      "bytesPerParam": 1.07,
+      "efficiency": 0.98,
+      "family": "gguf",
+      "description": "~8.5 bpw. Effectively lossless, ~half the size of FP16.",
+      "lifecycle": "active",
+      "provenance": {
+        "source": "vendor-spec",
+        "sourceUrl": "https://github.com/ggml-org/llama.cpp/blob/master/tools/quantize/README.md"
+      },
+      "useCase": "Reference / lossless storage"
+    },
+    {
+      "id": "gptq4",
+      "label": "GPTQ 4-bit",
+      "bytesPerParam": 0.55,
+      "efficiency": 0.85,
+      "family": "gptq",
+      "description": "Post-training 4-bit weight quant. Supported by vLLM, TGI, TensorRT-LLM (varies by version).",
+      "lifecycle": "active",
+      "provenance": {
+        "source": "unspecified"
+      },
+      "useCase": "vLLM/TGI serverless"
+    },
+    {
+      "id": "awq4",
+      "label": "AWQ 4-bit",
+      "bytesPerParam": 0.55,
+      "efficiency": 0.88,
+      "family": "awq",
+      "description": "Activation-aware W4A16. Preserves salient weights; better accuracy than GPTQ in some setups.",
+      "lifecycle": "active",
+      "provenance": {
+        "source": "unspecified"
+      },
+      "useCase": "vLLM/TensorRT-LLM serving"
+    },
+    {
+      "id": "exl2-6bpw",
+      "label": "EXL2 6.0 bpw",
+      "bytesPerParam": 0.75,
+      "efficiency": 0.92,
+      "family": "exl2",
+      "description": "Mixed-bit quantization for ExLlamaV2. Common 6.0 bpw preset balances speed/quality on consumer NVIDIA.",
+      "lifecycle": "active",
+      "provenance": {
+        "source": "unspecified"
+      },
+      "useCase": "Consumer NVIDIA + ExLlamaV2"
+    },
+    {
+      "id": "fp8",
+      "label": "FP8 (E4M3)",
+      "bytesPerParam": 1,
+      "efficiency": 1.5,
+      "family": "fp8",
+      "description": "8-bit floating-point. Native on H100/H200 — FASTER than FP16 (efficiency >1). Same VRAM as INT8 but better quality.",
+      "lifecycle": "active",
+      "provenance": {
+        "source": "unspecified"
+      },
+      "useCase": "H100/H200 with TRT-LLM/vLLM"
+    },
+    {
+      "id": "nvfp4",
+      "label": "NVFP4 (Blackwell)",
+      "bytesPerParam": 0.5,
+      "efficiency": 1.2,
+      "family": "nvfp4",
+      "description": "4-bit floating-point with block scaling. Native on Blackwell (B200/B300). Roughly 2x faster than FP8 on B200 in cited tests.",
+      "lifecycle": "active",
+      "provenance": {
+        "source": "unspecified"
+      },
+      "useCase": "Blackwell B200/B300 only"
+    }
+  ]
+}

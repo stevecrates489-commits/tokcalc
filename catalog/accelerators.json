@@ -1,0 +1,571 @@
+{
+  "records": [
+    {
+      "id": "h100-sxm",
+      "name": "H100 SXM5 80GB",
+      "vendor": "NVIDIA",
+      "category": "datacenter",
+      "memBandwidthGbps": 3350,
+      "flopsTflops": 990,
+      "vramGb": 80,
+      "nvlinkGbps": 900,
+      "usdPerHour": 2.5,
+      "year": 2022,
+      "lifecycle": "active",
+      "provenance": {
+        "source": "vendor-spec",
+        "sourceUrl": "https://www.nvidia.com/en-us/data-center/h100"
+      }
+    },
+    {
+      "id": "h100-pcie",
+      "name": "H100 PCIe 80GB",
+      "vendor": "NVIDIA",
+      "category": "datacenter",
+      "memBandwidthGbps": 2000,
+      "flopsTflops": 756,
+      "vramGb": 80,
+      "nvlinkGbps": 0,
+      "usdPerHour": 2,
+      "year": 2023,
+      "lifecycle": "active",
+      "provenance": {
+        "source": "vendor-spec",
+        "sourceUrl": "https://www.nvidia.com/en-us/data-center/h100"
+      }
+    },
+    {
+      "id": "h200-sxm",
+      "name": "H200 SXM5 141GB",
+      "vendor": "NVIDIA",
+      "category": "datacenter",
+      "memBandwidthGbps": 4800,
+      "flopsTflops": 990,
+      "vramGb": 141,
+      "nvlinkGbps": 900,
+      "usdPerHour": 4,
+      "year": 2024,
+      "lifecycle": "active",
+      "provenance": {
+        "source": "vendor-spec",
+        "sourceUrl": "https://www.nvidia.com/en-us/data-center/h200"
+      }
+    },
+    {
+      "id": "b200-sxm",
+      "name": "B200 SXM 192GB",
+      "vendor": "NVIDIA",
+      "category": "datacenter",
+      "memBandwidthGbps": 8000,
+      "flopsTflops": null,
+      "vramGb": 192,
+      "nvlinkGbps": 1800,
+      "usdPerHour": 6,
+      "year": 2025,
+      "lifecycle": "active",
+      "provenance": {
+        "source": "vendor-spec",
+        "sourceUrl": "https://www.nvidia.com/en-us/data-center/blackwell-architecture"
+      },
+      "note": "FP4/FP8 specs only; FP16 dense not publicly reported"
+    },
+    {
+      "id": "b300-sxm",
+      "name": "B300 SXM 288GB",
+      "vendor": "NVIDIA",
+      "category": "datacenter",
+      "memBandwidthGbps": 8000,
+      "flopsTflops": null,
+      "vramGb": 288,
+      "nvlinkGbps": 1800,
+      "usdPerHour": 8,
+      "year": 2025,
+      "lifecycle": "active",
+      "provenance": {
+        "source": "vendor-spec",
+        "sourceUrl": "https://www.nvidia.com/en-us/data-center/dgx-b300"
+      },
+      "note": "Announced; FP16 dense not published"
+    },
+    {
+      "id": "a100-80",
+      "name": "A100 80GB SXM4",
+      "vendor": "NVIDIA",
+      "category": "datacenter",
+      "memBandwidthGbps": 2000,
+      "flopsTflops": 312,
+      "vramGb": 80,
+      "nvlinkGbps": 600,
+      "usdPerHour": 1.2,
+      "year": 2020,
+      "lifecycle": "active",
+      "provenance": {
+        "source": "vendor-spec",
+        "sourceUrl": "https://www.nvidia.com/en-us/data-center/a100"
+      }
+    },
+    {
+      "id": "a100-40",
+      "name": "A100 40GB SXM4",
+      "vendor": "NVIDIA",
+      "category": "datacenter",
+      "memBandwidthGbps": 1550,
+      "flopsTflops": 312,
+      "vramGb": 40,
+      "nvlinkGbps": 600,
+      "usdPerHour": 0.9,
+      "year": 2020,
+      "lifecycle": "active",
+      "provenance": {
+        "source": "vendor-spec",
+        "sourceUrl": "https://www.nvidia.com/en-us/data-center/a100"
+      }
+    },
+    {
+      "id": "l40s",
+      "name": "L40S 48GB",
+      "vendor": "NVIDIA",
+      "category": "datacenter",
+      "memBandwidthGbps": 864,
+      "flopsTflops": 91.6,
+      "vramGb": 48,
+      "nvlinkGbps": 0,
+      "usdPerHour": 0.7,
+      "year": 2023,
+      "lifecycle": "active",
+      "provenance": {
+        "source": "vendor-spec",
+        "sourceUrl": "https://www.nvidia.com/en-us/data-center/l40s"
+      }
+    },
+    {
+      "id": "a10g",
+      "name": "A10G 24GB",
+      "vendor": "NVIDIA",
+      "category": "datacenter",
+      "memBandwidthGbps": 600,
+      "flopsTflops": 31,
+      "vramGb": 24,
+      "nvlinkGbps": 0,
+      "usdPerHour": 0.36,
+      "year": 2021,
+      "lifecycle": "active",
+      "provenance": {
+        "source": "vendor-spec",
+        "sourceUrl": "https://www.nvidia.com/content/dam/en-zz/Solutions/Data-Center/a10/pdf/a10-datasheet.pdf",
+        "retrievedAt": "2026-10-24"
+      },
+      "sourceUrl": "https://www.nvidia.com/content/dam/en-zz/Solutions/Data-Center/a10/pdf/a10-datasheet.pdf"
+    },
+    {
+      "id": "t4",
+      "name": "T4 16GB",
+      "vendor": "NVIDIA",
+      "category": "datacenter",
+      "memBandwidthGbps": 320,
+      "flopsTflops": 8.1,
+      "vramGb": 16,
+      "nvlinkGbps": 0,
+      "usdPerHour": 0.2,
+      "year": 2018,
+      "lifecycle": "active",
+      "provenance": {
+        "source": "vendor-spec",
+        "sourceUrl": "https://www.nvidia.com/en-us/data-center/tesla-t4/",
+        "retrievedAt": "2026-10-24"
+      },
+      "sourceUrl": "https://www.nvidia.com/en-us/data-center/tesla-t4/"
+    },
+    {
+      "id": "v100",
+      "name": "V100 SXM2 32GB",
+      "vendor": "NVIDIA",
+      "category": "legacy",
+      "memBandwidthGbps": 900,
+      "flopsTflops": 125,
+      "vramGb": 32,
+      "nvlinkGbps": 300,
+      "usdPerHour": 0.5,
+      "year": 2017,
+      "lifecycle": "active",
+      "provenance": {
+        "source": "vendor-spec",
+        "sourceUrl": "https://www.nvidia.com/en-us/data-center/",
+        "retrievedAt": "2026-10-24"
+      },
+      "note": "Legacy architecture (Volta)",
+      "sourceUrl": "https://www.nvidia.com/en-us/data-center/"
+    },
+    {
+      "id": "l4",
+      "name": "L4 24GB",
+      "vendor": "NVIDIA",
+      "category": "workstation",
+      "memBandwidthGbps": 300,
+      "flopsTflops": 30.3,
+      "vramGb": 24,
+      "nvlinkGbps": 0,
+      "usdPerHour": 0.4,
+      "year": 2023,
+      "lifecycle": "active",
+      "provenance": {
+        "source": "vendor-spec",
+        "sourceUrl": "https://www.nvidia.com/en-us/data-center/l4/",
+        "retrievedAt": "2026-10-24"
+      },
+      "sourceUrl": "https://www.nvidia.com/en-us/data-center/l4/"
+    },
+    {
+      "id": "rtx-6000a",
+      "name": "RTX 6000 Ada 48GB",
+      "vendor": "NVIDIA",
+      "category": "workstation",
+      "memBandwidthGbps": 960,
+      "flopsTflops": 91.6,
+      "vramGb": 48,
+      "nvlinkGbps": 0,
+      "usdPerHour": 0.8,
+      "year": 2022,
+      "lifecycle": "active",
+      "provenance": {
+        "source": "vendor-spec",
+        "sourceUrl": "https://www.nvidia.com/en-us/products/workstations/rtx-6000/",
+        "retrievedAt": "2026-10-24"
+      },
+      "sourceUrl": "https://www.nvidia.com/en-us/products/workstations/rtx-6000/"
+    },
+    {
+      "id": "rtx-pro-6000-bw",
+      "name": "RTX PRO 6000 Blackwell 96GB",
+      "vendor": "NVIDIA",
+      "category": "workstation",
+      "memBandwidthGbps": 1792,
+      "flopsTflops": 125,
+      "vramGb": 96,
+      "nvlinkGbps": 0,
+      "usdPerHour": 1.5,
+      "year": 2025,
+      "lifecycle": "active",
+      "provenance": {
+        "source": "vendor-spec",
+        "sourceUrl": "https://www.nvidia.com/en-us/products/workstations/professional-desktop-gpus/rtx-pro-6000-family"
+      }
+    },
+    {
+      "id": "a4000",
+      "name": "RTX A4000 16GB",
+      "vendor": "NVIDIA",
+      "category": "workstation",
+      "memBandwidthGbps": 448,
+      "flopsTflops": 19.5,
+      "vramGb": 16,
+      "nvlinkGbps": 0,
+      "usdPerHour": 0.3,
+      "year": 2021,
+      "lifecycle": "active",
+      "provenance": {
+        "source": "vendor-spec",
+        "sourceUrl": "https://www.nvidia.com/en-us/products/workstations/rtx-a4000/",
+        "retrievedAt": "2026-10-24"
+      },
+      "sourceUrl": "https://www.nvidia.com/en-us/products/workstations/rtx-a4000/"
+    },
+    {
+      "id": "rtx-5090",
+      "name": "RTX 5090 32GB",
+      "vendor": "NVIDIA",
+      "category": "consumer",
+      "memBandwidthGbps": 1792,
+      "flopsTflops": 105,
+      "vramGb": 32,
+      "nvlinkGbps": 0,
+      "usdPerHour": 0.5,
+      "year": 2025,
+      "lifecycle": "active",
+      "provenance": {
+        "source": "vendor-spec",
+        "sourceUrl": "https://www.nvidia.com/en-us/geforce/graphics-cards/50-series"
+      }
+    },
+    {
+      "id": "rtx-4090",
+      "name": "RTX 4090 24GB",
+      "vendor": "NVIDIA",
+      "category": "consumer",
+      "memBandwidthGbps": 1008,
+      "flopsTflops": 82.6,
+      "vramGb": 24,
+      "nvlinkGbps": 0,
+      "usdPerHour": 0.4,
+      "year": 2022,
+      "lifecycle": "active",
+      "provenance": {
+        "source": "vendor-spec",
+        "sourceUrl": "https://www.nvidia.com/en-us/geforce/graphics-cards/40-series/rtx-4090/",
+        "retrievedAt": "2026-10-24"
+      },
+      "sourceUrl": "https://www.nvidia.com/en-us/geforce/graphics-cards/40-series/rtx-4090/"
+    },
+    {
+      "id": "rtx-3090",
+      "name": "RTX 3090 24GB",
+      "vendor": "NVIDIA",
+      "category": "consumer",
+      "memBandwidthGbps": 936,
+      "flopsTflops": 35.6,
+      "vramGb": 24,
+      "nvlinkGbps": 0,
+      "usdPerHour": 0.25,
+      "year": 2020,
+      "lifecycle": "active",
+      "provenance": {
+        "source": "vendor-spec",
+        "sourceUrl": "https://www.nvidia.com/en-us/geforce/graphics-cards/30-series/rtx-3090/",
+        "retrievedAt": "2026-10-24"
+      },
+      "sourceUrl": "https://www.nvidia.com/en-us/geforce/graphics-cards/30-series/rtx-3090/"
+    },
+    {
+      "id": "rtx-4080",
+      "name": "RTX 4080 16GB",
+      "vendor": "NVIDIA",
+      "category": "consumer",
+      "memBandwidthGbps": 717,
+      "flopsTflops": 48.7,
+      "vramGb": 16,
+      "nvlinkGbps": 0,
+      "usdPerHour": 0.3,
+      "year": 2022,
+      "lifecycle": "active",
+      "provenance": {
+        "source": "vendor-spec",
+        "sourceUrl": "https://www.nvidia.com/en-us/geforce/graphics-cards/40-series/rtx-4080-family/",
+        "retrievedAt": "2026-10-24"
+      },
+      "sourceUrl": "https://www.nvidia.com/en-us/geforce/graphics-cards/40-series/rtx-4080-family/"
+    },
+    {
+      "id": "rtx-3080",
+      "name": "RTX 3080 10GB",
+      "vendor": "NVIDIA",
+      "category": "consumer",
+      "memBandwidthGbps": 760,
+      "flopsTflops": 34.1,
+      "vramGb": 10,
+      "nvlinkGbps": 0,
+      "usdPerHour": 0.2,
+      "year": 2020,
+      "lifecycle": "active",
+      "provenance": {
+        "source": "vendor-spec",
+        "sourceUrl": "https://www.nvidia.com/en-us/geforce/graphics-cards/30-series/rtx-3080-3080ti/",
+        "retrievedAt": "2026-10-24"
+      },
+      "sourceUrl": "https://www.nvidia.com/en-us/geforce/graphics-cards/30-series/rtx-3080-3080ti/"
+    },
+    {
+      "id": "mi300x",
+      "name": "AMD MI300X 192GB",
+      "vendor": "AMD",
+      "category": "datacenter",
+      "memBandwidthGbps": 5300,
+      "flopsTflops": 1307,
+      "vramGb": 192,
+      "nvlinkGbps": 0,
+      "usdPerHour": 2.5,
+      "year": 2023,
+      "lifecycle": "active",
+      "provenance": {
+        "source": "vendor-spec",
+        "sourceUrl": "https://www.amd.com/en/products/accelerators/instinct/mi300/mi300x.html"
+      },
+      "note": "ROCm; performance depends on ROCm version"
+    },
+    {
+      "id": "mi325x",
+      "name": "AMD MI325X 288GB",
+      "vendor": "AMD",
+      "category": "datacenter",
+      "memBandwidthGbps": 6000,
+      "flopsTflops": 1307,
+      "vramGb": 288,
+      "nvlinkGbps": 0,
+      "usdPerHour": 3.5,
+      "year": 2024,
+      "lifecycle": "active",
+      "provenance": {
+        "source": "vendor-spec",
+        "sourceUrl": "https://www.amd.com/en/products/accelerators/instinct.html"
+      }
+    },
+    {
+      "id": "gaudi3",
+      "name": "Intel Gaudi 3 128GB",
+      "vendor": "Intel",
+      "category": "datacenter",
+      "memBandwidthGbps": 3300,
+      "flopsTflops": 1835,
+      "vramGb": 128,
+      "nvlinkGbps": 0,
+      "usdPerHour": 2,
+      "year": 2024,
+      "lifecycle": "active",
+      "provenance": {
+        "source": "vendor-spec",
+        "sourceUrl": "https://www.intel.com/content/www/us/en/products/details/processors/ai-accelerators/gaudi.html"
+      },
+      "note": "Ethernet scale-out; not drop-in for CUDA"
+    },
+    {
+      "id": "tpu-v5p",
+      "name": "TPU v5p (per-chip, 95GB)",
+      "vendor": "Google",
+      "category": "tpu",
+      "memBandwidthGbps": 819,
+      "flopsTflops": 459,
+      "vramGb": 95,
+      "nvlinkGbps": 0,
+      "usdPerHour": 4.2,
+      "year": 2023,
+      "lifecycle": "active",
+      "provenance": {
+        "source": "vendor-spec",
+        "sourceUrl": "https://cloud.google.com/tpu/docs"
+      },
+      "note": "Pod-scale; per-chip specs only"
+    },
+    {
+      "id": "tpu-trillium",
+      "name": "TPU v6e Trillium (32GB)",
+      "vendor": "Google",
+      "category": "tpu",
+      "memBandwidthGbps": 819,
+      "flopsTflops": 918,
+      "vramGb": 32,
+      "nvlinkGbps": 0,
+      "usdPerHour": 0.8,
+      "year": 2024,
+      "lifecycle": "active",
+      "provenance": {
+        "source": "vendor-spec",
+        "sourceUrl": "https://cloud.google.com/tpu/docs"
+      }
+    },
+    {
+      "id": "groq-lpu",
+      "name": "GroqLPU (per-chip, 230MB SRAM)",
+      "vendor": "Groq",
+      "category": "lpu",
+      "memBandwidthGbps": 9000,
+      "flopsTflops": 750,
+      "vramGb": 0.23,
+      "nvlinkGbps": 0,
+      "usdPerHour": null,
+      "year": 2024,
+      "lifecycle": "active",
+      "provenance": {
+        "source": "vendor-spec",
+        "sourceUrl": "https://groq.com"
+      },
+      "note": "LPU architecture; SRAM-based, very different from HBM GPUs. Use cited model-specific benchmarks."
+    },
+    {
+      "id": "cerebras-cs3",
+      "name": "Cerebras CS-3 (WSE-3)",
+      "vendor": "Cerebras",
+      "category": "wse",
+      "memBandwidthGbps": 20000,
+      "flopsTflops": 1250,
+      "vramGb": 44,
+      "nvlinkGbps": 0,
+      "usdPerHour": null,
+      "year": 2024,
+      "lifecycle": "active",
+      "provenance": {
+        "source": "vendor-spec",
+        "sourceUrl": "https://www.cerebras.ai"
+      },
+      "note": "Wafer-scale; not comparable to per-GPU specs. Use cited benchmarks."
+    },
+    {
+      "id": "m2u-800",
+      "name": "Mac M2 Ultra (192GB unified)",
+      "vendor": "Apple",
+      "category": "mac",
+      "memBandwidthGbps": 800,
+      "flopsTflops": 27,
+      "vramGb": 192,
+      "nvlinkGbps": 0,
+      "usdPerHour": 0,
+      "year": 2023,
+      "lifecycle": "active",
+      "provenance": {
+        "source": "vendor-spec",
+        "sourceUrl": "https://www.apple.com/mac-studio/specs/",
+        "retrievedAt": "2026-10-24"
+      },
+      "note": "Unified memory; purchased hardware, not rentable. Legacy id 'm2u-800' refers to the 800 GB/s memory bandwidth, not VRAM.",
+      "sourceUrl": "https://www.apple.com/mac-studio/specs/"
+    },
+    {
+      "id": "m2u-192",
+      "name": "Mac M2 Ultra (192GB)",
+      "vendor": "Apple",
+      "category": "mac",
+      "memBandwidthGbps": 800,
+      "flopsTflops": 27,
+      "vramGb": 192,
+      "nvlinkGbps": 0,
+      "usdPerHour": 0,
+      "year": 2023,
+      "lifecycle": "active",
+      "provenance": {
+        "source": "vendor-spec",
+        "sourceUrl": "https://www.apple.com/mac-studio/specs/",
+        "retrievedAt": "2026-10-24"
+      },
+      "note": "Unified memory",
+      "sourceUrl": "https://www.apple.com/mac-studio/specs/"
+    },
+    {
+      "id": "m3max-64",
+      "name": "Mac M3 Max (64GB)",
+      "vendor": "Apple",
+      "category": "mac",
+      "memBandwidthGbps": 400,
+      "flopsTflops": 14,
+      "vramGb": 64,
+      "nvlinkGbps": 0,
+      "usdPerHour": 0,
+      "year": 2023,
+      "lifecycle": "active",
+      "provenance": {
+        "source": "vendor-spec",
+        "sourceUrl": "https://www.apple.com/macbook-pro/specs/",
+        "retrievedAt": "2026-10-24"
+      },
+      "note": "Unified memory",
+      "sourceUrl": "https://www.apple.com/macbook-pro/specs/"
+    },
+    {
+      "id": "m4max-128",
+      "name": "Mac M4 Max (128GB)",
+      "vendor": "Apple",
+      "category": "mac",
+      "memBandwidthGbps": 546,
+      "flopsTflops": 17,
+      "vramGb": 128,
+      "nvlinkGbps": 0,
+      "usdPerHour": 0,
+      "year": 2024,
+      "lifecycle": "active",
+      "provenance": {
+        "source": "vendor-spec",
+        "sourceUrl": "https://www.apple.com/macbook-pro/specs/",
+        "retrievedAt": "2026-10-24"
+      },
+      "note": "Unified memory",
+      "sourceUrl": "https://www.apple.com/macbook-pro/specs/"
+    }
+  ]
+}

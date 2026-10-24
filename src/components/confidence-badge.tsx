@@ -7,11 +7,23 @@ const CONFIDENCE_CONFIG: Record<
   Confidence,
   { color: string; label: string; description: string }
 > = {
-  measured: {
+  "official_spec": {
     color: "bg-emerald-500",
-    label: "Measured",
+    label: "Official spec",
     description:
-      "Sourced directly from official specs, model cards, API pricing pages, or HuggingFace config.json. Highest confidence — verify at the cited source URL.",
+      "Read directly from a vendor spec sheet, model card, or a HuggingFace config.json / safetensors index. Verify at the cited source URL.",
+  },
+  "published_price": {
+    color: "bg-sky-500",
+    label: "Published price",
+    description:
+      "A published price — cloud GPU $/hr or API token pricing. Prices move, so treat as current-at-publish, not a quote.",
+  },
+  "observed_run": {
+    color: "bg-violet-500",
+    label: "Observed run",
+    description:
+      "An actual measurement: a benchmark run, or a reading you recorded through record_measured. Real data beats any model of it.",
   },
   modeled: {
     color: "bg-emerald-400",
@@ -19,13 +31,13 @@ const CONFIDENCE_CONFIG: Record<
     description:
       "Derived from a physics-based formula with cited sources (e.g., decode tok/s = HBM_BW × η_mem × quant_eff / model_size). Conditional on assumptions — see formula docs.",
   },
-  inferred: {
+  heuristic: {
     color: "bg-amber-500",
-    label: "Inferred",
+    label: "Heuristic",
     description:
-      "Derived from a heuristic with known error bars (e.g., continuous batching multiplier default 1.5×, long-context attention O(N²) correction). Treat as ballpark, not exact.",
+      "Derived from a rule of thumb with known error bars (e.g., continuous batching multiplier default 1.5×, long-context attention O(N²) correction). Treat as ballpark, not exact.",
   },
-  "user-supplied": {
+  user_supplied: {
     color: "bg-zinc-400",
     label: "User-supplied",
     description: "You provided this value directly. We trust your input.",
@@ -95,7 +107,7 @@ export function ConfidenceLegend() {
       <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold mb-2">
         Confidence levels
       </div>
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px]">
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-[11px]">
         {(Object.keys(CONFIDENCE_CONFIG) as Confidence[]).map((key) => {
           const config = CONFIDENCE_CONFIG[key];
           return (

@@ -14,5 +14,12 @@
 /** npm package version this code corresponds to (@tokcalc/mcp-server). */
 export const MCP_SERVER_VERSION = "0.3.3";
 
-/** Model/GPU catalog version (bumped when src/lib/token-calc.ts catalog changes). */
-export const CATALOG_VERSION = "0.3.0";
+/**
+ * Model/GPU catalog version (bumped when the catalog data changes).
+ *
+ * The catalog itself lives in `catalog/*.json` and is loaded through
+ * `src/catalog/loader.ts`. This constant mirrors
+ * `catalog/manifest.json`'s `catalogVersion` — the manifest is the data,
+ * this is the value the MCP surface and the site report.
+ */
+export const CATALOG_VERSION = "0.4.0";

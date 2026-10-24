@@ -7,6 +7,66 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **Catalog module** (`catalog/` + `src/catalog/`) — the model, accelerator and
+  quantization data has moved out of `src/lib/token-calc.ts` into structured
+  JSON records under `catalog/`, loaded through one shared loader
+  (`src/catalog/loader.ts`) that the website, the MCP server and the CLI all
+  use. Every record carries a stable id, a lifecycle status and a
+  `provenance` block naming the source it came from. `src/catalog/schemas.ts`
+  holds the Zod schemas; `scripts/catalog-validate.ts` runs them in CI, so an
+  invalid record fails the build instead of reaching a user. The loader
+  deliberately does not import zod — it is bundled into the browser, and CI
+  has already checked the data by then.
+- **Catalog tooling** — `scripts/catalog-import.mjs` derives a model record
+  from a real HuggingFace checkpoint (config.json → per-layer attention
+  layout, safetensors index → exact resident bytes) instead of having
+  somebody transcribe a config by hand. `scripts/hf-params.mjs` reads the
+  safetensors headers to count total and active parameters.
+  `scripts/catalog-provenance.mjs` backfills provenance only for sources
+  that actually answer — a URL that 404s is worse than no URL.
+- **Architecture-aware KV engine** — the KV-cache maths now understands
+  sliding-window attention (whose cache stops growing at its window),
+  linear/recurrent attention (which keeps a fixed-size state instead of a
+  cache), and Multi-head Latent Attention (which stores one compressed
+  latent, not a key/value pair). A model with no declared layout produces
+  exactly the numbers it always did, so every pre-existing catalog entry is
+  unaffected.
+- **Five model families from real checkpoints** — Qwen3.8-27B, Kimi K3,
+  GPT-OSS 20B, GPT-OSS 120B and GLM-5.3, ingested with their upstream
+  repository, pinned revision, licence, native weight format, exact resident
+  checkpoint size and per-layer attention layout. 44 models in total.
+- **MCP tool annotations** — every tool now declares `readOnlyHint`,
+  `destructiveHint`, `idempotentHint` and `openWorldHint`, so a client can
+  tell a read from a write before calling it.
+- **First-answer latency** — a separate metric from TTFT. TTFT says when the
+  first character appears; first-answer latency says when the user has
+  something readable, which is usually several times longer.
+
+### Fixed
+
+- **The KV-cache rate was displayed 1024× too large.** The per-token figure
+  is in kilobytes, but it was being formatted by a helper that takes
+  gigabytes, so a 131.2 KB/token cache was shown as "131.2 MB/token" next to
+  a total that said 67.1 MB. There is now a formatter that takes kilobytes.
+- **TTFT was not prefill time.** The glossary claimed they were the same
+  thing. TTFT is prefill plus the first decode step plus per-request
+  overhead, and the engine now computes it that way.
+- **Provenance labels conflated three different kinds of evidence.**
+  "Measured" covered vendor spec sheets, published prices and real benchmark
+  runs alike. The confidence tiers are now `official_spec`,
+  `published_price`, `observed_run`, `modeled`, `heuristic` and
+  `user_supplied`.
+- **`record_measured` was advertised as read-only.** It persists a
+  calibration measurement and changes the numbers later `estimate_capacity`
+  calls return for that cell. It is now declared as a write, the npm listing
+  no longer calls all eleven tools read-only, and the surface-parity test
+  enforces it.
+- **The per-model pages used a hardcoded KV formula** that assumed every
+  layer is plain full attention. They now use the engine, so a hybrid model
+  shows the cache it actually has.
+- **The catalog called non-GPU accelerators "GPUs".** The reference tab, the
+  GPU pickers and the footer now say "Accelerators & systems" — the catalog
+  has always included TPUs, LPUs, wafer-scale systems and Apple Silicon.
 - **Programmatic content engine** — `src/lib/content/` derives every published
   number from `src/lib/token-calc.ts`, the same module the calculator, MCP
   server, and CLI use. No spec on these pages is hand-typed, so a catalog

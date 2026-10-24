@@ -42,6 +42,43 @@ describe("mcp surface parity", () => {
     expect(docs).toEqual(wire);
   });
 
+  it("docs annotations match the wire annotations name-for-name", () => {
+    const wireByName = new Map<string, any>(
+      TOOL_DEFINITIONS.map((t: { name: string; annotations: any }) => [t.name, t.annotations]),
+    );
+    for (const t of TOOL_CATALOG) {
+      const wire = wireByName.get(t.name);
+      expect(wire).toBeDefined();
+      expect(t.annotations).toEqual(wire);
+    }
+  });
+
+  it("every tool declares a title and the four MCP behaviour hints", () => {
+    for (const t of TOOL_CATALOG) {
+      expect(t.annotations.title.length).toBeGreaterThan(0);
+      expect(typeof t.annotations.readOnlyHint).toBe("boolean");
+      expect(typeof t.annotations.destructiveHint).toBe("boolean");
+      expect(typeof t.annotations.idempotentHint).toBe("boolean");
+      expect(typeof t.annotations.openWorldHint).toBe("boolean");
+    }
+  });
+
+  it("record_measured is declared as a WRITE, not a read-only tool", () => {
+    // It persists a calibration measurement to disk and changes the numbers
+    // later estimate_capacity calls return for that cell. A client that
+    // trusts readOnlyHint may call it without confirmation — so the flag
+    // has to be honest.
+    const rec = TOOL_CATALOG.find((t) => t.name === "record_measured");
+    expect(rec).toBeDefined();
+    expect(rec!.annotations.readOnlyHint).toBe(false);
+    expect(rec!.annotations.destructiveHint).toBe(false);
+  });
+
+  it("only record_measured writes; every other tool is read-only", () => {
+    const writers = TOOL_CATALOG.filter((t) => !t.annotations.readOnlyHint).map((t) => t.name);
+    expect(writers).toEqual(["record_measured"]);
+  });
+
   it("docs descriptions are non-empty and match the wire descriptions", () => {
     const wireByName = new Map<string, string>(
       TOOL_DEFINITIONS.map((t: { name: string; description: string }) => [t.name, t.description]),

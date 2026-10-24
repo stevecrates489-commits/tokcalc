@@ -26224,106 +26224,3113 @@ class Server extends Protocol {
     return this.notification({ method: "notifications/prompts/list_changed" });
   }
 }
-// ../../src/lib/token-calc.ts
-var QUANTIZATIONS = [
-  { id: "fp32", label: "FP32 (raw)", bytesPerParam: 4, efficiency: 1, family: "float", description: "32-bit float. Highest accuracy, 2x size of FP16." },
-  { id: "fp16", label: "FP16", bytesPerParam: 2, efficiency: 1, family: "float", description: "16-bit float. Standard for inference, no dequant overhead." },
-  { id: "bf16", label: "BF16", bytesPerParam: 2, efficiency: 1, family: "float", description: "Brain Float 16. Same size as FP16, better numerical range." },
-  { id: "int8", label: "INT8", bytesPerParam: 1, efficiency: 0.88, family: "float", description: "8-bit integer. Halves memory, ~12% dequant overhead." },
-  { id: "int4", label: "INT4 (generic)", bytesPerParam: 0.5, efficiency: 0.8, family: "float", description: "4-bit integer (generic). For specific format, pick GPTQ-4 / AWQ-4 / GGUF Q4_K_M." },
-  { id: "gguf-q2k", label: "GGUF Q2_K", bytesPerParam: 0.37, efficiency: 0.92, family: "gguf", description: "~2.6 bpw effective. Smallest; significant accuracy loss, use only as last resort.", useCase: "Extreme low-memory edge devices" },
-  { id: "gguf-q3km", label: "GGUF Q3_K_M", bytesPerParam: 0.42, efficiency: 0.93, family: "gguf", description: "~3.9 bpw. Low quality; acceptable for some chat uses but not coding/math.", useCase: "Low-memory local inference" },
-  { id: "gguf-q4km", label: "GGUF Q4_K_M", bytesPerParam: 0.55, efficiency: 0.9, family: "gguf", description: "~4.8 bpw. Recommended sweet spot for local Llama/Mistral on consumer GPUs.", useCase: "Recommended for local inference" },
-  { id: "gguf-q5km", label: "GGUF Q5_K_M", bytesPerParam: 0.68, efficiency: 0.92, family: "gguf", description: "~5.7 bpw. Higher quality than Q4, ~30% larger. Good when memory allows.", useCase: "Quality-focused local inference" },
-  { id: "gguf-q6k", label: "GGUF Q6_K", bytesPerParam: 0.82, efficiency: 0.95, family: "gguf", description: "~6.6 bpw. Near-FP16 quality, ~60% larger than Q4_K_M.", useCase: "Near-lossless local inference" },
-  { id: "gguf-q8", label: "GGUF Q8_0", bytesPerParam: 1.07, efficiency: 0.98, family: "gguf", description: "~8.5 bpw. Effectively lossless, ~half the size of FP16.", useCase: "Reference / lossless storage" },
-  { id: "gptq4", label: "GPTQ 4-bit", bytesPerParam: 0.55, efficiency: 0.85, family: "gptq", description: "Post-training 4-bit weight quant. Supported by vLLM, TGI, TensorRT-LLM (varies by version).", useCase: "vLLM/TGI serverless" },
-  { id: "awq4", label: "AWQ 4-bit", bytesPerParam: 0.55, efficiency: 0.88, family: "awq", description: "Activation-aware W4A16. Preserves salient weights; better accuracy than GPTQ in some setups.", useCase: "vLLM/TensorRT-LLM serving" },
-  { id: "exl2-6bpw", label: "EXL2 6.0 bpw", bytesPerParam: 0.75, efficiency: 0.92, family: "exl2", description: "Mixed-bit quantization for ExLlamaV2. Common 6.0 bpw preset balances speed/quality on consumer NVIDIA.", useCase: "Consumer NVIDIA + ExLlamaV2" },
-  { id: "fp8", label: "FP8 (E4M3)", bytesPerParam: 1, efficiency: 1.5, family: "fp8", description: "8-bit floating-point. Native on H100/H200 — FASTER than FP16 (efficiency >1). Same VRAM as INT8 but better quality.", useCase: "H100/H200 with TRT-LLM/vLLM" },
-  { id: "nvfp4", label: "NVFP4 (Blackwell)", bytesPerParam: 0.5, efficiency: 1.2, family: "nvfp4", description: "4-bit floating-point with block scaling. Native on Blackwell (B200/B300). Roughly 2x faster than FP8 on B200 in cited tests.", useCase: "Blackwell B200/B300 only" }
-];
-var QUANT_MAP = Object.fromEntries(QUANTIZATIONS.map((q) => [q.id, q]));
-var GPUS = [
-  { id: "h100-sxm", name: "H100 SXM5 80GB", vendor: "NVIDIA", category: "datacenter", memBandwidthGbps: 3350, flopsTflops: 990, vramGb: 80, nvlinkGbps: 900, usdPerHour: 2.5, year: 2022, sourceUrl: "https://www.nvidia.com/en-us/data-center/h100" },
-  { id: "h100-pcie", name: "H100 PCIe 80GB", vendor: "NVIDIA", category: "datacenter", memBandwidthGbps: 2000, flopsTflops: 756, vramGb: 80, nvlinkGbps: 0, usdPerHour: 2, year: 2023, sourceUrl: "https://www.nvidia.com/en-us/data-center/h100" },
-  { id: "h200-sxm", name: "H200 SXM5 141GB", vendor: "NVIDIA", category: "datacenter", memBandwidthGbps: 4800, flopsTflops: 990, vramGb: 141, nvlinkGbps: 900, usdPerHour: 4, year: 2024, sourceUrl: "https://www.nvidia.com/en-us/data-center/h200" },
-  { id: "b200-sxm", name: "B200 SXM 192GB", vendor: "NVIDIA", category: "datacenter", memBandwidthGbps: 8000, flopsTflops: null, vramGb: 192, nvlinkGbps: 1800, usdPerHour: 6, year: 2025, note: "FP4/FP8 specs only; FP16 dense not publicly reported", sourceUrl: "https://www.nvidia.com/en-us/data-center/blackwell-architecture" },
-  { id: "b300-sxm", name: "B300 SXM 288GB", vendor: "NVIDIA", category: "datacenter", memBandwidthGbps: 8000, flopsTflops: null, vramGb: 288, nvlinkGbps: 1800, usdPerHour: 8, year: 2025, note: "Announced; FP16 dense not published", sourceUrl: "https://www.nvidia.com/en-us/data-center/dgx-b300" },
-  { id: "a100-80", name: "A100 80GB SXM4", vendor: "NVIDIA", category: "datacenter", memBandwidthGbps: 2000, flopsTflops: 312, vramGb: 80, nvlinkGbps: 600, usdPerHour: 1.2, year: 2020, sourceUrl: "https://www.nvidia.com/en-us/data-center/a100" },
-  { id: "a100-40", name: "A100 40GB SXM4", vendor: "NVIDIA", category: "datacenter", memBandwidthGbps: 1550, flopsTflops: 312, vramGb: 40, nvlinkGbps: 600, usdPerHour: 0.9, year: 2020, sourceUrl: "https://www.nvidia.com/en-us/data-center/a100" },
-  { id: "l40s", name: "L40S 48GB", vendor: "NVIDIA", category: "datacenter", memBandwidthGbps: 864, flopsTflops: 91.6, vramGb: 48, nvlinkGbps: 0, usdPerHour: 0.7, year: 2023, sourceUrl: "https://www.nvidia.com/en-us/data-center/l40s" },
-  { id: "a10g", name: "A10G 24GB", vendor: "NVIDIA", category: "datacenter", memBandwidthGbps: 600, flopsTflops: 31, vramGb: 24, nvlinkGbps: 0, usdPerHour: 0.36, year: 2021 },
-  { id: "t4", name: "T4 16GB", vendor: "NVIDIA", category: "datacenter", memBandwidthGbps: 320, flopsTflops: 8.1, vramGb: 16, nvlinkGbps: 0, usdPerHour: 0.2, year: 2018 },
-  { id: "v100", name: "V100 SXM2 32GB", vendor: "NVIDIA", category: "legacy", memBandwidthGbps: 900, flopsTflops: 125, vramGb: 32, nvlinkGbps: 300, usdPerHour: 0.5, year: 2017, note: "Legacy architecture (Volta)" },
-  { id: "l4", name: "L4 24GB", vendor: "NVIDIA", category: "workstation", memBandwidthGbps: 300, flopsTflops: 30.3, vramGb: 24, nvlinkGbps: 0, usdPerHour: 0.4, year: 2023 },
-  { id: "rtx-6000a", name: "RTX 6000 Ada 48GB", vendor: "NVIDIA", category: "workstation", memBandwidthGbps: 960, flopsTflops: 91.6, vramGb: 48, nvlinkGbps: 0, usdPerHour: 0.8, year: 2022 },
-  { id: "rtx-pro-6000-bw", name: "RTX PRO 6000 Blackwell 96GB", vendor: "NVIDIA", category: "workstation", memBandwidthGbps: 1792, flopsTflops: 125, vramGb: 96, nvlinkGbps: 0, usdPerHour: 1.5, year: 2025, sourceUrl: "https://www.nvidia.com/en-us/products/workstations/professional-desktop-gpus/rtx-pro-6000-family" },
-  { id: "a4000", name: "RTX A4000 16GB", vendor: "NVIDIA", category: "workstation", memBandwidthGbps: 448, flopsTflops: 19.5, vramGb: 16, nvlinkGbps: 0, usdPerHour: 0.3, year: 2021 },
-  { id: "rtx-5090", name: "RTX 5090 32GB", vendor: "NVIDIA", category: "consumer", memBandwidthGbps: 1792, flopsTflops: 105, vramGb: 32, nvlinkGbps: 0, usdPerHour: 0.5, year: 2025, sourceUrl: "https://www.nvidia.com/en-us/geforce/graphics-cards/50-series" },
-  { id: "rtx-4090", name: "RTX 4090 24GB", vendor: "NVIDIA", category: "consumer", memBandwidthGbps: 1008, flopsTflops: 82.6, vramGb: 24, nvlinkGbps: 0, usdPerHour: 0.4, year: 2022 },
-  { id: "rtx-3090", name: "RTX 3090 24GB", vendor: "NVIDIA", category: "consumer", memBandwidthGbps: 936, flopsTflops: 35.6, vramGb: 24, nvlinkGbps: 0, usdPerHour: 0.25, year: 2020 },
-  { id: "rtx-4080", name: "RTX 4080 16GB", vendor: "NVIDIA", category: "consumer", memBandwidthGbps: 717, flopsTflops: 48.7, vramGb: 16, nvlinkGbps: 0, usdPerHour: 0.3, year: 2022 },
-  { id: "rtx-3080", name: "RTX 3080 10GB", vendor: "NVIDIA", category: "consumer", memBandwidthGbps: 760, flopsTflops: 34.1, vramGb: 10, nvlinkGbps: 0, usdPerHour: 0.2, year: 2020 },
-  { id: "mi300x", name: "AMD MI300X 192GB", vendor: "AMD", category: "datacenter", memBandwidthGbps: 5300, flopsTflops: 1307, vramGb: 192, nvlinkGbps: 0, usdPerHour: 2.5, year: 2023, note: "ROCm; performance depends on ROCm version", sourceUrl: "https://www.amd.com/en/products/accelerators/instinct/mi300/mi300x.html" },
-  { id: "mi325x", name: "AMD MI325X 288GB", vendor: "AMD", category: "datacenter", memBandwidthGbps: 6000, flopsTflops: 1307, vramGb: 288, nvlinkGbps: 0, usdPerHour: 3.5, year: 2024, sourceUrl: "https://www.amd.com/en/products/accelerators/instinct.html" },
-  { id: "gaudi3", name: "Intel Gaudi 3 128GB", vendor: "Intel", category: "datacenter", memBandwidthGbps: 3300, flopsTflops: 1835, vramGb: 128, nvlinkGbps: 0, usdPerHour: 2, year: 2024, note: "Ethernet scale-out; not drop-in for CUDA", sourceUrl: "https://www.intel.com/content/www/us/en/products/details/processors/ai-accelerators/gaudi.html" },
-  { id: "tpu-v5p", name: "TPU v5p (per-chip, 95GB)", vendor: "Google", category: "tpu", memBandwidthGbps: 819, flopsTflops: 459, vramGb: 95, nvlinkGbps: 0, usdPerHour: 4.2, year: 2023, note: "Pod-scale; per-chip specs only", sourceUrl: "https://cloud.google.com/tpu/docs" },
-  { id: "tpu-trillium", name: "TPU v6e Trillium (32GB)", vendor: "Google", category: "tpu", memBandwidthGbps: 819, flopsTflops: 918, vramGb: 32, nvlinkGbps: 0, usdPerHour: 0.8, year: 2024, sourceUrl: "https://cloud.google.com/tpu/docs" },
-  { id: "groq-lpu", name: "GroqLPU (per-chip, 230MB SRAM)", vendor: "Groq", category: "lpu", memBandwidthGbps: 9000, flopsTflops: 750, vramGb: 0.23, nvlinkGbps: 0, usdPerHour: null, year: 2024, note: "LPU architecture; SRAM-based, very different from HBM GPUs. Use cited model-specific benchmarks.", sourceUrl: "https://groq.com" },
-  { id: "cerebras-cs3", name: "Cerebras CS-3 (WSE-3)", vendor: "Cerebras", category: "wse", memBandwidthGbps: 20000, flopsTflops: 1250, vramGb: 44, nvlinkGbps: 0, usdPerHour: null, year: 2024, note: "Wafer-scale; not comparable to per-GPU specs. Use cited benchmarks.", sourceUrl: "https://www.cerebras.ai" },
-  { id: "m2u-800", name: "Mac M2 Ultra (192GB unified)", vendor: "Apple", category: "mac", memBandwidthGbps: 800, flopsTflops: 27, vramGb: 192, nvlinkGbps: 0, usdPerHour: 0, year: 2023, note: "Unified memory; purchased hardware, not rentable. Legacy id 'm2u-800' refers to the 800 GB/s memory bandwidth, not VRAM." },
-  { id: "m2u-192", name: "Mac M2 Ultra (192GB)", vendor: "Apple", category: "mac", memBandwidthGbps: 800, flopsTflops: 27, vramGb: 192, nvlinkGbps: 0, usdPerHour: 0, year: 2023, note: "Unified memory" },
-  { id: "m3max-64", name: "Mac M3 Max (64GB)", vendor: "Apple", category: "mac", memBandwidthGbps: 400, flopsTflops: 14, vramGb: 64, nvlinkGbps: 0, usdPerHour: 0, year: 2023, note: "Unified memory" },
-  { id: "m4max-128", name: "Mac M4 Max (128GB)", vendor: "Apple", category: "mac", memBandwidthGbps: 546, flopsTflops: 17, vramGb: 128, nvlinkGbps: 0, usdPerHour: 0, year: 2024, note: "Unified memory" }
-];
-var GPU_MAP = Object.fromEntries(GPUS.map((g) => [g.id, g]));
-var MODELS = [
-  { id: "llama3-8b", name: "Llama 3 8B", family: "Llama", category: "text", paramsB: 8.03, activeParamsB: 8.03, layers: 32, hiddenDim: 4096, qHeads: 32, kvHeads: 8, headDim: 128, vocabSize: 128256, maxContext: 8192, isMoE: false },
-  { id: "llama3-70b", name: "Llama 3 70B", family: "Llama", category: "text", paramsB: 70.6, activeParamsB: 70.6, layers: 80, hiddenDim: 8192, qHeads: 64, kvHeads: 8, headDim: 128, vocabSize: 128256, maxContext: 8192, isMoE: false },
-  { id: "llama3-405b", name: "Llama 3.1 405B", family: "Llama", category: "text", paramsB: 405, activeParamsB: 405, layers: 126, hiddenDim: 16384, qHeads: 128, kvHeads: 8, headDim: 128, vocabSize: 128256, maxContext: 131072, isMoE: false },
-  { id: "llama3-3-70b", name: "Llama 3.3 70B", family: "Llama", category: "text", paramsB: 70.6, activeParamsB: 70.6, layers: 80, hiddenDim: 8192, qHeads: 64, kvHeads: 8, headDim: 128, vocabSize: 128256, maxContext: 131072, isMoE: false },
-  { id: "llama2-7b", name: "Llama 2 7B", family: "Llama", category: "text", paramsB: 6.74, activeParamsB: 6.74, layers: 32, hiddenDim: 4096, qHeads: 32, kvHeads: 32, headDim: 128, vocabSize: 32000, maxContext: 4096, isMoE: false },
-  { id: "llama4-scout", name: "Llama 4 Scout 17B-16E (MoE, VLM)", family: "Llama", category: "vlm", paramsB: 109, activeParamsB: 17, layers: 48, hiddenDim: 5120, qHeads: 40, kvHeads: 8, headDim: 128, vocabSize: 202000, maxContext: 1e7, isMoE: true },
-  { id: "llama4-maverick", name: "Llama 4 Maverick 17B-128E (MoE, VLM)", family: "Llama", category: "vlm", paramsB: 400, activeParamsB: 17, layers: 48, hiddenDim: 5120, qHeads: 40, kvHeads: 8, headDim: 128, vocabSize: 202000, maxContext: 1e6, isMoE: true },
-  { id: "mistral-7b", name: "Mistral 7B v0.3", family: "Mistral", category: "text", paramsB: 7.24, activeParamsB: 7.24, layers: 32, hiddenDim: 4096, qHeads: 32, kvHeads: 8, headDim: 128, vocabSize: 32768, maxContext: 32768, isMoE: false },
-  { id: "mixtral-8x7b", name: "Mixtral 8x7B (MoE)", family: "Mistral", category: "text", paramsB: 46.7, activeParamsB: 12.9, layers: 32, hiddenDim: 4096, qHeads: 32, kvHeads: 8, headDim: 128, vocabSize: 32000, maxContext: 32768, isMoE: true },
-  { id: "mixtral-8x22b", name: "Mixtral 8x22B (MoE)", family: "Mistral", category: "text", paramsB: 141, activeParamsB: 39, layers: 56, hiddenDim: 6144, qHeads: 48, kvHeads: 8, headDim: 128, vocabSize: 32000, maxContext: 65536, isMoE: true },
-  { id: "mistral-large-3", name: "Mistral Large 3 (256K)", family: "Mistral", category: "text", paramsB: 235, activeParamsB: 71, layers: 78, hiddenDim: 7168, qHeads: 56, kvHeads: 8, headDim: 128, vocabSize: 131072, maxContext: 262144, isMoE: true },
-  { id: "pixtral-12b", name: "Pixtral 12B (VLM)", family: "Mistral", category: "vlm", paramsB: 12, activeParamsB: 12, layers: 40, hiddenDim: 5120, qHeads: 32, kvHeads: 8, headDim: 128, vocabSize: 131072, maxContext: 131072, isMoE: false },
-  { id: "codestral-25", name: "Codestral 25.08", family: "Mistral", category: "code", paramsB: 22, activeParamsB: 22, layers: 56, hiddenDim: 6144, qHeads: 48, kvHeads: 8, headDim: 128, vocabSize: 32768, maxContext: 32768, isMoE: false },
-  { id: "qwen2-7b", name: "Qwen2 7B", family: "Qwen", category: "text", paramsB: 7.62, activeParamsB: 7.62, layers: 28, hiddenDim: 3584, qHeads: 28, kvHeads: 4, headDim: 128, vocabSize: 152064, maxContext: 32768, isMoE: false },
-  { id: "qwen2-72b", name: "Qwen2 72B", family: "Qwen", category: "text", paramsB: 72.7, activeParamsB: 72.7, layers: 80, hiddenDim: 8192, qHeads: 64, kvHeads: 8, headDim: 128, vocabSize: 152064, maxContext: 32768, isMoE: false },
-  { id: "qwen2-5-14b", name: "Qwen 2.5 14B", family: "Qwen", category: "text", paramsB: 14, activeParamsB: 14, layers: 48, hiddenDim: 5120, qHeads: 40, kvHeads: 8, headDim: 128, vocabSize: 152064, maxContext: 131072, isMoE: false },
-  { id: "qwen2-5-72b", name: "Qwen 2.5 72B", family: "Qwen", category: "text", paramsB: 72.7, activeParamsB: 72.7, layers: 80, hiddenDim: 8192, qHeads: 64, kvHeads: 8, headDim: 128, vocabSize: 152064, maxContext: 131072, isMoE: false },
-  { id: "qwen3-4b", name: "Qwen 3 4B", family: "Qwen", category: "text", paramsB: 4, activeParamsB: 4, layers: 36, hiddenDim: 2560, qHeads: 32, kvHeads: 8, headDim: 128, vocabSize: 151936, maxContext: 40960, isMoE: false },
-  { id: "qwen3-8b", name: "Qwen 3 8B", family: "Qwen", category: "text", paramsB: 8, activeParamsB: 8, layers: 36, hiddenDim: 4096, qHeads: 32, kvHeads: 8, headDim: 128, vocabSize: 151936, maxContext: 40960, isMoE: false },
-  { id: "qwen3-14b", name: "Qwen 3 14B", family: "Qwen", category: "text", paramsB: 14, activeParamsB: 14, layers: 40, hiddenDim: 5120, qHeads: 40, kvHeads: 8, headDim: 128, vocabSize: 151936, maxContext: 40960, isMoE: false },
-  { id: "qwen3-32b", name: "Qwen 3 32B", family: "Qwen", category: "text", paramsB: 32, activeParamsB: 32, layers: 64, hiddenDim: 5120, qHeads: 64, kvHeads: 8, headDim: 128, vocabSize: 151936, maxContext: 40960, isMoE: false },
-  { id: "qwen3-30b-a3b", name: "Qwen 3 30B-A3B (MoE)", family: "Qwen", category: "text", paramsB: 30, activeParamsB: 3, layers: 48, hiddenDim: 2048, qHeads: 32, kvHeads: 4, headDim: 128, vocabSize: 151936, maxContext: 40960, isMoE: true },
-  { id: "qwen3-235b-a22b", name: "Qwen 3 235B-A22B (MoE)", family: "Qwen", category: "text", paramsB: 235, activeParamsB: 22, layers: 94, hiddenDim: 4096, qHeads: 64, kvHeads: 4, headDim: 128, vocabSize: 151936, maxContext: 40960, isMoE: true },
-  { id: "qwen2-5-vl-7b", name: "Qwen 2.5-VL 7B (VLM)", family: "Qwen", category: "vlm", paramsB: 7, activeParamsB: 7, layers: 28, hiddenDim: 3584, qHeads: 28, kvHeads: 4, headDim: 128, vocabSize: 152064, maxContext: 128000, isMoE: false },
-  { id: "qwen2-5-vl-72b", name: "Qwen 2.5-VL 72B (VLM)", family: "Qwen", category: "vlm", paramsB: 72, activeParamsB: 72, layers: 80, hiddenDim: 8192, qHeads: 64, kvHeads: 8, headDim: 128, vocabSize: 152064, maxContext: 128000, isMoE: false },
-  { id: "deepseek-v3", name: "DeepSeek V3 671B (MoE)", family: "DeepSeek", category: "text", paramsB: 671, activeParamsB: 37, layers: 61, hiddenDim: 7168, qHeads: 128, kvHeads: 128, headDim: 128, vocabSize: 102400, maxContext: 65536, isMoE: true },
-  { id: "deepseek-r1", name: "DeepSeek R1 671B (MoE)", family: "DeepSeek", category: "reasoning", paramsB: 671, activeParamsB: 37, layers: 61, hiddenDim: 7168, qHeads: 128, kvHeads: 128, headDim: 128, vocabSize: 102400, maxContext: 65536, isMoE: true },
-  { id: "deepseek-coder-v2", name: "DeepSeek Coder V2 236B (MoE)", family: "DeepSeek", category: "code", paramsB: 236, activeParamsB: 21, layers: 47, hiddenDim: 6144, qHeads: 64, kvHeads: 8, headDim: 128, vocabSize: 102400, maxContext: 131072, isMoE: true },
-  { id: "gemma2-9b", name: "Gemma 2 9B", family: "Gemma", category: "text", paramsB: 9, activeParamsB: 9, layers: 42, hiddenDim: 3584, qHeads: 16, kvHeads: 8, headDim: 256, vocabSize: 256000, maxContext: 8192, isMoE: false },
-  { id: "gemma2-27b", name: "Gemma 2 27B", family: "Gemma", category: "text", paramsB: 27, activeParamsB: 27, layers: 46, hiddenDim: 4608, qHeads: 32, kvHeads: 16, headDim: 128, vocabSize: 256000, maxContext: 8192, isMoE: false },
-  { id: "phi3-7b", name: "Phi-3 Mini 3.8B", family: "Phi", category: "text", paramsB: 3.8, activeParamsB: 3.8, layers: 32, hiddenDim: 3072, qHeads: 32, kvHeads: 32, headDim: 96, vocabSize: 32000, maxContext: 4096, isMoE: false },
-  { id: "phi4-14b", name: "Phi-4 14B", family: "Phi", category: "text", paramsB: 14, activeParamsB: 14, layers: 40, hiddenDim: 5120, qHeads: 32, kvHeads: 8, headDim: 128, vocabSize: 100352, maxContext: 16384, isMoE: false },
-  { id: "smollm2-1.7b", name: "SmolLM2 1.7B Instruct", family: "HuggingFaceTB", category: "text", paramsB: 1.7, activeParamsB: 1.7, layers: 24, hiddenDim: 2048, qHeads: 32, kvHeads: 32, headDim: 64, vocabSize: 128256, maxContext: 8192, isMoE: false },
-  { id: "falcon3-10b", name: "Falcon 3 10B Instruct", family: "TII", category: "text", paramsB: 10, activeParamsB: 10, layers: 40, hiddenDim: 4096, qHeads: 32, kvHeads: 8, headDim: 128, vocabSize: 49152, maxContext: 32768, isMoE: false },
-  { id: "olmo2-13b", name: "OLMo 2 13B", family: "AllenAI", category: "text", paramsB: 13, activeParamsB: 13, layers: 40, hiddenDim: 5120, qHeads: 40, kvHeads: 8, headDim: 128, vocabSize: 50281, maxContext: 4096, isMoE: false },
-  { id: "gpt-neox-20b", name: "GPT-NeoX 20B", family: "EleutherAI", category: "text", paramsB: 20, activeParamsB: 20, layers: 44, hiddenDim: 6144, qHeads: 64, kvHeads: 64, headDim: 96, vocabSize: 50432, maxContext: 2048, isMoE: false },
-  { id: "bge-m3", name: "BGE-M3 (embed, 1024-dim)", family: "BAAI", category: "embedding", paramsB: 0.568, activeParamsB: 0.568, layers: 24, hiddenDim: 1024, qHeads: 16, kvHeads: 16, headDim: 64, vocabSize: 250002, maxContext: 8192, isMoE: false },
-  { id: "e5-mlarge", name: "Multilingual E5 Large (1024-dim)", family: "intfloat", category: "embedding", paramsB: 0.56, activeParamsB: 0.56, layers: 24, hiddenDim: 1024, qHeads: 16, kvHeads: 16, headDim: 64, vocabSize: 250047, maxContext: 514, isMoE: false },
-  { id: "gte-large", name: "GTE Large (1024-dim)", family: "thenlper", category: "embedding", paramsB: 0.44, activeParamsB: 0.44, layers: 24, hiddenDim: 1024, qHeads: 16, kvHeads: 16, headDim: 64, vocabSize: 30522, maxContext: 512, isMoE: false }
-];
+// ../../catalog/models.json
+var models_default = {
+  records: [
+    {
+      id: "bge-m3",
+      name: "BGE-M3 (embed, 1024-dim)",
+      family: "BAAI",
+      category: "embedding",
+      paramsB: 0.568,
+      activeParamsB: 0.568,
+      layers: 24,
+      hiddenDim: 1024,
+      qHeads: 16,
+      kvHeads: 16,
+      headDim: 64,
+      vocabSize: 250002,
+      maxContext: 8192,
+      isMoE: false,
+      lifecycle: "active",
+      provenance: {
+        source: "model-card",
+        sourceUrl: "https://huggingface.co/BAAI/bge-m3"
+      }
+    },
+    {
+      id: "codestral-25",
+      name: "Codestral 25.08",
+      family: "Mistral",
+      category: "code",
+      paramsB: 22,
+      activeParamsB: 22,
+      layers: 56,
+      hiddenDim: 6144,
+      qHeads: 48,
+      kvHeads: 8,
+      headDim: 128,
+      vocabSize: 32768,
+      maxContext: 32768,
+      isMoE: false,
+      lifecycle: "active",
+      provenance: {
+        source: "model-card",
+        sourceUrl: "https://huggingface.co/mistralai/Codestral-2508",
+        retrievedAt: "2026-10-24",
+        notes: "The upstream repository is licence-gated: the model card is readable after accepting the licence."
+      }
+    },
+    {
+      id: "deepseek-coder-v2",
+      name: "DeepSeek Coder V2 236B (MoE)",
+      family: "DeepSeek",
+      category: "code",
+      paramsB: 236,
+      activeParamsB: 21,
+      layers: 47,
+      hiddenDim: 6144,
+      qHeads: 64,
+      kvHeads: 8,
+      headDim: 128,
+      vocabSize: 102400,
+      maxContext: 131072,
+      isMoE: true,
+      lifecycle: "active",
+      provenance: {
+        source: "model-card",
+        sourceUrl: "https://huggingface.co/deepseek-ai/DeepSeek-Coder-V2-Instruct",
+        retrievedAt: "2026-10-24"
+      }
+    },
+    {
+      id: "deepseek-r1",
+      name: "DeepSeek R1 671B (MoE)",
+      family: "DeepSeek",
+      category: "reasoning",
+      paramsB: 671,
+      activeParamsB: 37,
+      layers: 61,
+      hiddenDim: 7168,
+      qHeads: 128,
+      kvHeads: 128,
+      headDim: 128,
+      vocabSize: 102400,
+      maxContext: 65536,
+      isMoE: true,
+      lifecycle: "active",
+      provenance: {
+        source: "model-card",
+        sourceUrl: "https://huggingface.co/deepseek-ai/DeepSeek-R1",
+        retrievedAt: "2026-10-24"
+      }
+    },
+    {
+      id: "deepseek-v3",
+      name: "DeepSeek V3 671B (MoE)",
+      family: "DeepSeek",
+      category: "text",
+      paramsB: 671,
+      activeParamsB: 37,
+      layers: 61,
+      hiddenDim: 7168,
+      qHeads: 128,
+      kvHeads: 128,
+      headDim: 128,
+      vocabSize: 102400,
+      maxContext: 65536,
+      isMoE: true,
+      lifecycle: "active",
+      provenance: {
+        source: "model-card",
+        sourceUrl: "https://huggingface.co/deepseek-ai/DeepSeek-V3",
+        retrievedAt: "2026-10-24"
+      }
+    },
+    {
+      id: "e5-mlarge",
+      name: "Multilingual E5 Large (1024-dim)",
+      family: "intfloat",
+      category: "embedding",
+      paramsB: 0.56,
+      activeParamsB: 0.56,
+      layers: 24,
+      hiddenDim: 1024,
+      qHeads: 16,
+      kvHeads: 16,
+      headDim: 64,
+      vocabSize: 250047,
+      maxContext: 514,
+      isMoE: false,
+      lifecycle: "active",
+      provenance: {
+        source: "model-card",
+        sourceUrl: "https://huggingface.co/intfloat/multilingual-e5-large"
+      }
+    },
+    {
+      id: "falcon3-10b",
+      name: "Falcon 3 10B Instruct",
+      family: "TII",
+      category: "text",
+      paramsB: 10,
+      activeParamsB: 10,
+      layers: 40,
+      hiddenDim: 4096,
+      qHeads: 32,
+      kvHeads: 8,
+      headDim: 128,
+      vocabSize: 49152,
+      maxContext: 32768,
+      isMoE: false,
+      lifecycle: "active",
+      provenance: {
+        source: "model-card",
+        sourceUrl: "https://huggingface.co/tiiuae/falcon3-10b-instruct",
+        retrievedAt: "2026-10-24"
+      }
+    },
+    {
+      id: "gemma2-27b",
+      name: "Gemma 2 27B",
+      family: "Gemma",
+      category: "text",
+      paramsB: 27,
+      activeParamsB: 27,
+      layers: 46,
+      hiddenDim: 4608,
+      qHeads: 32,
+      kvHeads: 16,
+      headDim: 128,
+      vocabSize: 256000,
+      maxContext: 8192,
+      isMoE: false,
+      lifecycle: "active",
+      provenance: {
+        source: "model-card",
+        sourceUrl: "https://huggingface.co/google/gemma-2-27b",
+        retrievedAt: "2026-10-24"
+      }
+    },
+    {
+      id: "gemma2-9b",
+      name: "Gemma 2 9B",
+      family: "Gemma",
+      category: "text",
+      paramsB: 9,
+      activeParamsB: 9,
+      layers: 42,
+      hiddenDim: 3584,
+      qHeads: 16,
+      kvHeads: 8,
+      headDim: 256,
+      vocabSize: 256000,
+      maxContext: 8192,
+      isMoE: false,
+      lifecycle: "active",
+      provenance: {
+        source: "model-card",
+        sourceUrl: "https://huggingface.co/google/gemma-2-9b",
+        retrievedAt: "2026-10-24"
+      }
+    },
+    {
+      id: "glm-5-3",
+      name: "GLM-5.3 (MoE)",
+      family: "GLM",
+      category: "text",
+      paramsB: 753.33,
+      activeParamsB: 19.117,
+      layers: 78,
+      hiddenDim: 6144,
+      qHeads: 64,
+      kvHeads: 64,
+      headDim: 192,
+      vocabSize: 154880,
+      maxContext: 1048576,
+      isMoE: true,
+      attentionLayers: [
+        {
+          kind: "mla",
+          kvLoraRank: 512,
+          mlaRopeHeadDim: 64
+        },
+        {
+          kind: "mla",
+          kvLoraRank: 512,
+          mlaRopeHeadDim: 64
+        },
+        {
+          kind: "mla",
+          kvLoraRank: 512,
+          mlaRopeHeadDim: 64
+        },
+        {
+          kind: "mla",
+          kvLoraRank: 512,
+          mlaRopeHeadDim: 64
+        },
+        {
+          kind: "mla",
+          kvLoraRank: 512,
+          mlaRopeHeadDim: 64
+        },
+        {
+          kind: "mla",
+          kvLoraRank: 512,
+          mlaRopeHeadDim: 64
+        },
+        {
+          kind: "mla",
+          kvLoraRank: 512,
+          mlaRopeHeadDim: 64
+        },
+        {
+          kind: "mla",
+          kvLoraRank: 512,
+          mlaRopeHeadDim: 64
+        },
+        {
+          kind: "mla",
+          kvLoraRank: 512,
+          mlaRopeHeadDim: 64
+        },
+        {
+          kind: "mla",
+          kvLoraRank: 512,
+          mlaRopeHeadDim: 64
+        },
+        {
+          kind: "mla",
+          kvLoraRank: 512,
+          mlaRopeHeadDim: 64
+        },
+        {
+          kind: "mla",
+          kvLoraRank: 512,
+          mlaRopeHeadDim: 64
+        },
+        {
+          kind: "mla",
+          kvLoraRank: 512,
+          mlaRopeHeadDim: 64
+        },
+        {
+          kind: "mla",
+          kvLoraRank: 512,
+          mlaRopeHeadDim: 64
+        },
+        {
+          kind: "mla",
+          kvLoraRank: 512,
+          mlaRopeHeadDim: 64
+        },
+        {
+          kind: "mla",
+          kvLoraRank: 512,
+          mlaRopeHeadDim: 64
+        },
+        {
+          kind: "mla",
+          kvLoraRank: 512,
+          mlaRopeHeadDim: 64
+        },
+        {
+          kind: "mla",
+          kvLoraRank: 512,
+          mlaRopeHeadDim: 64
+        },
+        {
+          kind: "mla",
+          kvLoraRank: 512,
+          mlaRopeHeadDim: 64
+        },
+        {
+          kind: "mla",
+          kvLoraRank: 512,
+          mlaRopeHeadDim: 64
+        },
+        {
+          kind: "mla",
+          kvLoraRank: 512,
+          mlaRopeHeadDim: 64
+        },
+        {
+          kind: "mla",
+          kvLoraRank: 512,
+          mlaRopeHeadDim: 64
+        },
+        {
+          kind: "mla",
+          kvLoraRank: 512,
+          mlaRopeHeadDim: 64
+        },
+        {
+          kind: "mla",
+          kvLoraRank: 512,
+          mlaRopeHeadDim: 64
+        },
+        {
+          kind: "mla",
+          kvLoraRank: 512,
+          mlaRopeHeadDim: 64
+        },
+        {
+          kind: "mla",
+          kvLoraRank: 512,
+          mlaRopeHeadDim: 64
+        },
+        {
+          kind: "mla",
+          kvLoraRank: 512,
+          mlaRopeHeadDim: 64
+        },
+        {
+          kind: "mla",
+          kvLoraRank: 512,
+          mlaRopeHeadDim: 64
+        },
+        {
+          kind: "mla",
+          kvLoraRank: 512,
+          mlaRopeHeadDim: 64
+        },
+        {
+          kind: "mla",
+          kvLoraRank: 512,
+          mlaRopeHeadDim: 64
+        },
+        {
+          kind: "mla",
+          kvLoraRank: 512,
+          mlaRopeHeadDim: 64
+        },
+        {
+          kind: "mla",
+          kvLoraRank: 512,
+          mlaRopeHeadDim: 64
+        },
+        {
+          kind: "mla",
+          kvLoraRank: 512,
+          mlaRopeHeadDim: 64
+        },
+        {
+          kind: "mla",
+          kvLoraRank: 512,
+          mlaRopeHeadDim: 64
+        },
+        {
+          kind: "mla",
+          kvLoraRank: 512,
+          mlaRopeHeadDim: 64
+        },
+        {
+          kind: "mla",
+          kvLoraRank: 512,
+          mlaRopeHeadDim: 64
+        },
+        {
+          kind: "mla",
+          kvLoraRank: 512,
+          mlaRopeHeadDim: 64
+        },
+        {
+          kind: "mla",
+          kvLoraRank: 512,
+          mlaRopeHeadDim: 64
+        },
+        {
+          kind: "mla",
+          kvLoraRank: 512,
+          mlaRopeHeadDim: 64
+        },
+        {
+          kind: "mla",
+          kvLoraRank: 512,
+          mlaRopeHeadDim: 64
+        },
+        {
+          kind: "mla",
+          kvLoraRank: 512,
+          mlaRopeHeadDim: 64
+        },
+        {
+          kind: "mla",
+          kvLoraRank: 512,
+          mlaRopeHeadDim: 64
+        },
+        {
+          kind: "mla",
+          kvLoraRank: 512,
+          mlaRopeHeadDim: 64
+        },
+        {
+          kind: "mla",
+          kvLoraRank: 512,
+          mlaRopeHeadDim: 64
+        },
+        {
+          kind: "mla",
+          kvLoraRank: 512,
+          mlaRopeHeadDim: 64
+        },
+        {
+          kind: "mla",
+          kvLoraRank: 512,
+          mlaRopeHeadDim: 64
+        },
+        {
+          kind: "mla",
+          kvLoraRank: 512,
+          mlaRopeHeadDim: 64
+        },
+        {
+          kind: "mla",
+          kvLoraRank: 512,
+          mlaRopeHeadDim: 64
+        },
+        {
+          kind: "mla",
+          kvLoraRank: 512,
+          mlaRopeHeadDim: 64
+        },
+        {
+          kind: "mla",
+          kvLoraRank: 512,
+          mlaRopeHeadDim: 64
+        },
+        {
+          kind: "mla",
+          kvLoraRank: 512,
+          mlaRopeHeadDim: 64
+        },
+        {
+          kind: "mla",
+          kvLoraRank: 512,
+          mlaRopeHeadDim: 64
+        },
+        {
+          kind: "mla",
+          kvLoraRank: 512,
+          mlaRopeHeadDim: 64
+        },
+        {
+          kind: "mla",
+          kvLoraRank: 512,
+          mlaRopeHeadDim: 64
+        },
+        {
+          kind: "mla",
+          kvLoraRank: 512,
+          mlaRopeHeadDim: 64
+        },
+        {
+          kind: "mla",
+          kvLoraRank: 512,
+          mlaRopeHeadDim: 64
+        },
+        {
+          kind: "mla",
+          kvLoraRank: 512,
+          mlaRopeHeadDim: 64
+        },
+        {
+          kind: "mla",
+          kvLoraRank: 512,
+          mlaRopeHeadDim: 64
+        },
+        {
+          kind: "mla",
+          kvLoraRank: 512,
+          mlaRopeHeadDim: 64
+        },
+        {
+          kind: "mla",
+          kvLoraRank: 512,
+          mlaRopeHeadDim: 64
+        },
+        {
+          kind: "mla",
+          kvLoraRank: 512,
+          mlaRopeHeadDim: 64
+        },
+        {
+          kind: "mla",
+          kvLoraRank: 512,
+          mlaRopeHeadDim: 64
+        },
+        {
+          kind: "mla",
+          kvLoraRank: 512,
+          mlaRopeHeadDim: 64
+        },
+        {
+          kind: "mla",
+          kvLoraRank: 512,
+          mlaRopeHeadDim: 64
+        },
+        {
+          kind: "mla",
+          kvLoraRank: 512,
+          mlaRopeHeadDim: 64
+        },
+        {
+          kind: "mla",
+          kvLoraRank: 512,
+          mlaRopeHeadDim: 64
+        },
+        {
+          kind: "mla",
+          kvLoraRank: 512,
+          mlaRopeHeadDim: 64
+        },
+        {
+          kind: "mla",
+          kvLoraRank: 512,
+          mlaRopeHeadDim: 64
+        },
+        {
+          kind: "mla",
+          kvLoraRank: 512,
+          mlaRopeHeadDim: 64
+        },
+        {
+          kind: "mla",
+          kvLoraRank: 512,
+          mlaRopeHeadDim: 64
+        },
+        {
+          kind: "mla",
+          kvLoraRank: 512,
+          mlaRopeHeadDim: 64
+        },
+        {
+          kind: "mla",
+          kvLoraRank: 512,
+          mlaRopeHeadDim: 64
+        },
+        {
+          kind: "mla",
+          kvLoraRank: 512,
+          mlaRopeHeadDim: 64
+        },
+        {
+          kind: "mla",
+          kvLoraRank: 512,
+          mlaRopeHeadDim: 64
+        },
+        {
+          kind: "mla",
+          kvLoraRank: 512,
+          mlaRopeHeadDim: 64
+        },
+        {
+          kind: "mla",
+          kvLoraRank: 512,
+          mlaRopeHeadDim: 64
+        },
+        {
+          kind: "mla",
+          kvLoraRank: 512,
+          mlaRopeHeadDim: 64
+        },
+        {
+          kind: "mla",
+          kvLoraRank: 512,
+          mlaRopeHeadDim: 64
+        }
+      ],
+      architectureStatus: "memory-only",
+      residentWeightBytes: 755617140416,
+      repository: "zai-org/GLM-5.3",
+      revision: "ba32f8c19c8738e2c57c71798c601d477a7bf844",
+      nativeWeightFormat: "fp8",
+      lifecycle: "active",
+      provenance: {
+        source: "hf-config",
+        sourceUrl: "https://huggingface.co/zai-org/GLM-5.3",
+        retrievedAt: "2026-10-24",
+        notes: "Architecture derived from config.json at revision ba32f8c19c8738e2c57c71798c601d477a7bf844. Resident weight bytes (755,617,140,416) measured from model.safetensors.index.json total_size. Total parameter count (753,329,940,480) from the HuggingFace model API safetensors metadata. DeepSeek-style sparse attention (DSA): 78 layers carry a per-token index cache (index_n_heads=32, index_head_dim=128) that this engine does not model. Memory figures for this model UNDERSTATE the real requirement at long context; the KV cache itself (MLA) is modelled exactly. Checkpoint carries 1 multi-token-prediction head layer(s). These are a draft head, not part of the per-token decode path, so they are not counted as active parameters. Active parameter count (19.117B) taken from the model card; the checkpoint config does not state it."
+      },
+      license: "glm-5.3"
+    },
+    {
+      id: "gpt-neox-20b",
+      name: "GPT-NeoX 20B",
+      family: "EleutherAI",
+      category: "text",
+      paramsB: 20,
+      activeParamsB: 20,
+      layers: 44,
+      hiddenDim: 6144,
+      qHeads: 64,
+      kvHeads: 64,
+      headDim: 96,
+      vocabSize: 50432,
+      maxContext: 2048,
+      isMoE: false,
+      lifecycle: "active",
+      provenance: {
+        source: "model-card",
+        sourceUrl: "https://huggingface.co/EleutherAI/gpt-neox-20b",
+        retrievedAt: "2026-10-24"
+      }
+    },
+    {
+      id: "gpt-oss-120b",
+      name: "GPT-OSS 120B (MoE)",
+      family: "GPT-OSS",
+      category: "text",
+      paramsB: 116.829,
+      activeParamsB: 5.1,
+      layers: 36,
+      hiddenDim: 2880,
+      qHeads: 64,
+      kvHeads: 8,
+      headDim: 64,
+      vocabSize: 201088,
+      maxContext: 131072,
+      isMoE: true,
+      attentionLayers: [
+        {
+          kind: "sliding",
+          windowTokens: 128
+        },
+        {
+          kind: "full"
+        },
+        {
+          kind: "sliding",
+          windowTokens: 128
+        },
+        {
+          kind: "full"
+        },
+        {
+          kind: "sliding",
+          windowTokens: 128
+        },
+        {
+          kind: "full"
+        },
+        {
+          kind: "sliding",
+          windowTokens: 128
+        },
+        {
+          kind: "full"
+        },
+        {
+          kind: "sliding",
+          windowTokens: 128
+        },
+        {
+          kind: "full"
+        },
+        {
+          kind: "sliding",
+          windowTokens: 128
+        },
+        {
+          kind: "full"
+        },
+        {
+          kind: "sliding",
+          windowTokens: 128
+        },
+        {
+          kind: "full"
+        },
+        {
+          kind: "sliding",
+          windowTokens: 128
+        },
+        {
+          kind: "full"
+        },
+        {
+          kind: "sliding",
+          windowTokens: 128
+        },
+        {
+          kind: "full"
+        },
+        {
+          kind: "sliding",
+          windowTokens: 128
+        },
+        {
+          kind: "full"
+        },
+        {
+          kind: "sliding",
+          windowTokens: 128
+        },
+        {
+          kind: "full"
+        },
+        {
+          kind: "sliding",
+          windowTokens: 128
+        },
+        {
+          kind: "full"
+        },
+        {
+          kind: "sliding",
+          windowTokens: 128
+        },
+        {
+          kind: "full"
+        },
+        {
+          kind: "sliding",
+          windowTokens: 128
+        },
+        {
+          kind: "full"
+        },
+        {
+          kind: "sliding",
+          windowTokens: 128
+        },
+        {
+          kind: "full"
+        },
+        {
+          kind: "sliding",
+          windowTokens: 128
+        },
+        {
+          kind: "full"
+        },
+        {
+          kind: "sliding",
+          windowTokens: 128
+        },
+        {
+          kind: "full"
+        },
+        {
+          kind: "sliding",
+          windowTokens: 128
+        },
+        {
+          kind: "full"
+        }
+      ],
+      architectureStatus: "supported",
+      residentWeightBytes: 65248815744,
+      repository: "openai/gpt-oss-120b",
+      revision: "b5c939de8f754692c1647ca79fbf85e8c1e70f8a",
+      nativeWeightFormat: "mxfp4",
+      lifecycle: "active",
+      provenance: {
+        source: "hf-config",
+        sourceUrl: "https://huggingface.co/openai/gpt-oss-120b",
+        retrievedAt: "2026-10-24",
+        notes: "Architecture derived from config.json at revision b5c939de8f754692c1647ca79fbf85e8c1e70f8a. Resident weight bytes (65,248,815,744) measured from model.safetensors.index.json total_size. Total parameter count (116,829,156,672) from the HuggingFace model API safetensors metadata. Active parameter count (5.1B) taken from the model card; the checkpoint config does not state it."
+      },
+      license: "apache-2.0",
+      contextExtensionMethod: "RoPE scaling (yarn)",
+      nativeContext: 4096
+    },
+    {
+      id: "gpt-oss-20b",
+      name: "GPT-OSS 20B (MoE)",
+      family: "GPT-OSS",
+      category: "text",
+      paramsB: 20.915,
+      activeParamsB: 3.6,
+      layers: 24,
+      hiddenDim: 2880,
+      qHeads: 64,
+      kvHeads: 8,
+      headDim: 64,
+      vocabSize: 201088,
+      maxContext: 131072,
+      isMoE: true,
+      attentionLayers: [
+        {
+          kind: "sliding",
+          windowTokens: 128
+        },
+        {
+          kind: "full"
+        },
+        {
+          kind: "sliding",
+          windowTokens: 128
+        },
+        {
+          kind: "full"
+        },
+        {
+          kind: "sliding",
+          windowTokens: 128
+        },
+        {
+          kind: "full"
+        },
+        {
+          kind: "sliding",
+          windowTokens: 128
+        },
+        {
+          kind: "full"
+        },
+        {
+          kind: "sliding",
+          windowTokens: 128
+        },
+        {
+          kind: "full"
+        },
+        {
+          kind: "sliding",
+          windowTokens: 128
+        },
+        {
+          kind: "full"
+        },
+        {
+          kind: "sliding",
+          windowTokens: 128
+        },
+        {
+          kind: "full"
+        },
+        {
+          kind: "sliding",
+          windowTokens: 128
+        },
+        {
+          kind: "full"
+        },
+        {
+          kind: "sliding",
+          windowTokens: 128
+        },
+        {
+          kind: "full"
+        },
+        {
+          kind: "sliding",
+          windowTokens: 128
+        },
+        {
+          kind: "full"
+        },
+        {
+          kind: "sliding",
+          windowTokens: 128
+        },
+        {
+          kind: "full"
+        },
+        {
+          kind: "sliding",
+          windowTokens: 128
+        },
+        {
+          kind: "full"
+        }
+      ],
+      architectureStatus: "supported",
+      residentWeightBytes: 13761264768,
+      repository: "openai/gpt-oss-20b",
+      revision: "6cee5e81ee83917806bbde320786a8fb61efebee",
+      nativeWeightFormat: "mxfp4",
+      lifecycle: "active",
+      provenance: {
+        source: "hf-config",
+        sourceUrl: "https://huggingface.co/openai/gpt-oss-20b",
+        retrievedAt: "2026-10-24",
+        notes: "Architecture derived from config.json at revision 6cee5e81ee83917806bbde320786a8fb61efebee. Resident weight bytes (13,761,264,768) measured from model.safetensors.index.json total_size. Total parameter count (20,914,757,184) from the HuggingFace model API safetensors metadata. Active parameter count (3.6B) taken from the model card; the checkpoint config does not state it."
+      },
+      license: "apache-2.0",
+      contextExtensionMethod: "RoPE scaling (yarn)",
+      nativeContext: 4096
+    },
+    {
+      id: "gte-large",
+      name: "GTE Large (1024-dim)",
+      family: "thenlper",
+      category: "embedding",
+      paramsB: 0.44,
+      activeParamsB: 0.44,
+      layers: 24,
+      hiddenDim: 1024,
+      qHeads: 16,
+      kvHeads: 16,
+      headDim: 64,
+      vocabSize: 30522,
+      maxContext: 512,
+      isMoE: false,
+      lifecycle: "active",
+      provenance: {
+        source: "model-card",
+        sourceUrl: "https://huggingface.co/thenlper/gte-large",
+        retrievedAt: "2026-10-24"
+      }
+    },
+    {
+      id: "kimi-k3",
+      name: "Kimi K3 (MoE, VLM)",
+      family: "Kimi",
+      category: "vlm",
+      paramsB: 2779.932,
+      activeParamsB: 104,
+      layers: 93,
+      hiddenDim: 7168,
+      qHeads: 96,
+      kvHeads: 96,
+      headDim: 74,
+      vocabSize: 163840,
+      maxContext: 1048576,
+      isMoE: true,
+      attentionLayers: [
+        {
+          kind: "kda",
+          stateBytes: 3145728
+        },
+        {
+          kind: "kda",
+          stateBytes: 3145728
+        },
+        {
+          kind: "kda",
+          stateBytes: 3145728
+        },
+        {
+          kind: "mla",
+          kvLoraRank: 512,
+          mlaRopeHeadDim: 64
+        },
+        {
+          kind: "kda",
+          stateBytes: 3145728
+        },
+        {
+          kind: "kda",
+          stateBytes: 3145728
+        },
+        {
+          kind: "kda",
+          stateBytes: 3145728
+        },
+        {
+          kind: "mla",
+          kvLoraRank: 512,
+          mlaRopeHeadDim: 64
+        },
+        {
+          kind: "kda",
+          stateBytes: 3145728
+        },
+        {
+          kind: "kda",
+          stateBytes: 3145728
+        },
+        {
+          kind: "kda",
+          stateBytes: 3145728
+        },
+        {
+          kind: "mla",
+          kvLoraRank: 512,
+          mlaRopeHeadDim: 64
+        },
+        {
+          kind: "kda",
+          stateBytes: 3145728
+        },
+        {
+          kind: "kda",
+          stateBytes: 3145728
+        },
+        {
+          kind: "kda",
+          stateBytes: 3145728
+        },
+        {
+          kind: "mla",
+          kvLoraRank: 512,
+          mlaRopeHeadDim: 64
+        },
+        {
+          kind: "kda",
+          stateBytes: 3145728
+        },
+        {
+          kind: "kda",
+          stateBytes: 3145728
+        },
+        {
+          kind: "kda",
+          stateBytes: 3145728
+        },
+        {
+          kind: "mla",
+          kvLoraRank: 512,
+          mlaRopeHeadDim: 64
+        },
+        {
+          kind: "kda",
+          stateBytes: 3145728
+        },
+        {
+          kind: "kda",
+          stateBytes: 3145728
+        },
+        {
+          kind: "kda",
+          stateBytes: 3145728
+        },
+        {
+          kind: "mla",
+          kvLoraRank: 512,
+          mlaRopeHeadDim: 64
+        },
+        {
+          kind: "kda",
+          stateBytes: 3145728
+        },
+        {
+          kind: "kda",
+          stateBytes: 3145728
+        },
+        {
+          kind: "kda",
+          stateBytes: 3145728
+        },
+        {
+          kind: "mla",
+          kvLoraRank: 512,
+          mlaRopeHeadDim: 64
+        },
+        {
+          kind: "kda",
+          stateBytes: 3145728
+        },
+        {
+          kind: "kda",
+          stateBytes: 3145728
+        },
+        {
+          kind: "kda",
+          stateBytes: 3145728
+        },
+        {
+          kind: "mla",
+          kvLoraRank: 512,
+          mlaRopeHeadDim: 64
+        },
+        {
+          kind: "kda",
+          stateBytes: 3145728
+        },
+        {
+          kind: "kda",
+          stateBytes: 3145728
+        },
+        {
+          kind: "kda",
+          stateBytes: 3145728
+        },
+        {
+          kind: "mla",
+          kvLoraRank: 512,
+          mlaRopeHeadDim: 64
+        },
+        {
+          kind: "kda",
+          stateBytes: 3145728
+        },
+        {
+          kind: "kda",
+          stateBytes: 3145728
+        },
+        {
+          kind: "kda",
+          stateBytes: 3145728
+        },
+        {
+          kind: "mla",
+          kvLoraRank: 512,
+          mlaRopeHeadDim: 64
+        },
+        {
+          kind: "kda",
+          stateBytes: 3145728
+        },
+        {
+          kind: "kda",
+          stateBytes: 3145728
+        },
+        {
+          kind: "kda",
+          stateBytes: 3145728
+        },
+        {
+          kind: "mla",
+          kvLoraRank: 512,
+          mlaRopeHeadDim: 64
+        },
+        {
+          kind: "kda",
+          stateBytes: 3145728
+        },
+        {
+          kind: "kda",
+          stateBytes: 3145728
+        },
+        {
+          kind: "kda",
+          stateBytes: 3145728
+        },
+        {
+          kind: "mla",
+          kvLoraRank: 512,
+          mlaRopeHeadDim: 64
+        },
+        {
+          kind: "kda",
+          stateBytes: 3145728
+        },
+        {
+          kind: "kda",
+          stateBytes: 3145728
+        },
+        {
+          kind: "kda",
+          stateBytes: 3145728
+        },
+        {
+          kind: "mla",
+          kvLoraRank: 512,
+          mlaRopeHeadDim: 64
+        },
+        {
+          kind: "kda",
+          stateBytes: 3145728
+        },
+        {
+          kind: "kda",
+          stateBytes: 3145728
+        },
+        {
+          kind: "kda",
+          stateBytes: 3145728
+        },
+        {
+          kind: "mla",
+          kvLoraRank: 512,
+          mlaRopeHeadDim: 64
+        },
+        {
+          kind: "kda",
+          stateBytes: 3145728
+        },
+        {
+          kind: "kda",
+          stateBytes: 3145728
+        },
+        {
+          kind: "kda",
+          stateBytes: 3145728
+        },
+        {
+          kind: "mla",
+          kvLoraRank: 512,
+          mlaRopeHeadDim: 64
+        },
+        {
+          kind: "kda",
+          stateBytes: 3145728
+        },
+        {
+          kind: "kda",
+          stateBytes: 3145728
+        },
+        {
+          kind: "kda",
+          stateBytes: 3145728
+        },
+        {
+          kind: "mla",
+          kvLoraRank: 512,
+          mlaRopeHeadDim: 64
+        },
+        {
+          kind: "kda",
+          stateBytes: 3145728
+        },
+        {
+          kind: "kda",
+          stateBytes: 3145728
+        },
+        {
+          kind: "kda",
+          stateBytes: 3145728
+        },
+        {
+          kind: "mla",
+          kvLoraRank: 512,
+          mlaRopeHeadDim: 64
+        },
+        {
+          kind: "kda",
+          stateBytes: 3145728
+        },
+        {
+          kind: "kda",
+          stateBytes: 3145728
+        },
+        {
+          kind: "kda",
+          stateBytes: 3145728
+        },
+        {
+          kind: "mla",
+          kvLoraRank: 512,
+          mlaRopeHeadDim: 64
+        },
+        {
+          kind: "kda",
+          stateBytes: 3145728
+        },
+        {
+          kind: "kda",
+          stateBytes: 3145728
+        },
+        {
+          kind: "kda",
+          stateBytes: 3145728
+        },
+        {
+          kind: "mla",
+          kvLoraRank: 512,
+          mlaRopeHeadDim: 64
+        },
+        {
+          kind: "kda",
+          stateBytes: 3145728
+        },
+        {
+          kind: "kda",
+          stateBytes: 3145728
+        },
+        {
+          kind: "kda",
+          stateBytes: 3145728
+        },
+        {
+          kind: "mla",
+          kvLoraRank: 512,
+          mlaRopeHeadDim: 64
+        },
+        {
+          kind: "kda",
+          stateBytes: 3145728
+        },
+        {
+          kind: "kda",
+          stateBytes: 3145728
+        },
+        {
+          kind: "kda",
+          stateBytes: 3145728
+        },
+        {
+          kind: "mla",
+          kvLoraRank: 512,
+          mlaRopeHeadDim: 64
+        },
+        {
+          kind: "kda",
+          stateBytes: 3145728
+        },
+        {
+          kind: "kda",
+          stateBytes: 3145728
+        },
+        {
+          kind: "kda",
+          stateBytes: 3145728
+        },
+        {
+          kind: "mla",
+          kvLoraRank: 512,
+          mlaRopeHeadDim: 64
+        },
+        {
+          kind: "kda",
+          stateBytes: 3145728
+        },
+        {
+          kind: "kda",
+          stateBytes: 3145728
+        },
+        {
+          kind: "kda",
+          stateBytes: 3145728
+        },
+        {
+          kind: "mla",
+          kvLoraRank: 512,
+          mlaRopeHeadDim: 64
+        },
+        {
+          kind: "mla",
+          kvLoraRank: 512,
+          mlaRopeHeadDim: 64
+        }
+      ],
+      architectureStatus: "supported",
+      residentWeightBytes: 1560860324864,
+      repository: "moonshotai/Kimi-K3",
+      revision: "f831ab66814297da540d832a5235f8e904f29d06",
+      nativeWeightFormat: "mxfp4",
+      lifecycle: "active",
+      provenance: {
+        source: "hf-config",
+        sourceUrl: "https://huggingface.co/moonshotai/Kimi-K3",
+        retrievedAt: "2026-10-24",
+        notes: "Architecture derived from config.json at revision f831ab66814297da540d832a5235f8e904f29d06. Resident weight bytes (1,560,860,324,864) measured from model.safetensors.index.json total_size. Total parameter count (2,779,931,837,184) from the HuggingFace model API safetensors metadata. Recurrent state size is derived from the checkpoint dtype (bf16). The config does not publish a separate state dtype; the error bound is under 0.03% of the model footprint. Active parameter count (104B) taken from the model card; the checkpoint config does not state it."
+      },
+      license: "kimi-k3"
+    },
+    {
+      id: "llama2-7b",
+      name: "Llama 2 7B",
+      family: "Llama",
+      category: "text",
+      paramsB: 6.74,
+      activeParamsB: 6.74,
+      layers: 32,
+      hiddenDim: 4096,
+      qHeads: 32,
+      kvHeads: 32,
+      headDim: 128,
+      vocabSize: 32000,
+      maxContext: 4096,
+      isMoE: false,
+      lifecycle: "active",
+      provenance: {
+        source: "model-card",
+        sourceUrl: "https://huggingface.co/meta-llama/Llama-2-7b-hf",
+        retrievedAt: "2026-10-24"
+      }
+    },
+    {
+      id: "llama3-3-70b",
+      name: "Llama 3.3 70B",
+      family: "Llama",
+      category: "text",
+      paramsB: 70.6,
+      activeParamsB: 70.6,
+      layers: 80,
+      hiddenDim: 8192,
+      qHeads: 64,
+      kvHeads: 8,
+      headDim: 128,
+      vocabSize: 128256,
+      maxContext: 131072,
+      isMoE: false,
+      lifecycle: "active",
+      provenance: {
+        source: "model-card",
+        sourceUrl: "https://huggingface.co/meta-llama/Llama-3.3-70B-Instruct",
+        retrievedAt: "2026-10-24"
+      }
+    },
+    {
+      id: "llama3-405b",
+      name: "Llama 3.1 405B",
+      family: "Llama",
+      category: "text",
+      paramsB: 405,
+      activeParamsB: 405,
+      layers: 126,
+      hiddenDim: 16384,
+      qHeads: 128,
+      kvHeads: 8,
+      headDim: 128,
+      vocabSize: 128256,
+      maxContext: 131072,
+      isMoE: false,
+      lifecycle: "active",
+      provenance: {
+        source: "model-card",
+        sourceUrl: "https://huggingface.co/meta-llama/Meta-Llama-3.1-405B-Instruct",
+        retrievedAt: "2026-10-24"
+      }
+    },
+    {
+      id: "llama3-70b",
+      name: "Llama 3 70B",
+      family: "Llama",
+      category: "text",
+      paramsB: 70.6,
+      activeParamsB: 70.6,
+      layers: 80,
+      hiddenDim: 8192,
+      qHeads: 64,
+      kvHeads: 8,
+      headDim: 128,
+      vocabSize: 128256,
+      maxContext: 8192,
+      isMoE: false,
+      lifecycle: "active",
+      provenance: {
+        source: "model-card",
+        sourceUrl: "https://huggingface.co/meta-llama/Meta-Llama-3-70B",
+        retrievedAt: "2026-10-24"
+      }
+    },
+    {
+      id: "llama3-8b",
+      name: "Llama 3 8B",
+      family: "Llama",
+      category: "text",
+      paramsB: 8.03,
+      activeParamsB: 8.03,
+      layers: 32,
+      hiddenDim: 4096,
+      qHeads: 32,
+      kvHeads: 8,
+      headDim: 128,
+      vocabSize: 128256,
+      maxContext: 8192,
+      isMoE: false,
+      lifecycle: "active",
+      provenance: {
+        source: "model-card",
+        sourceUrl: "https://huggingface.co/meta-llama/Meta-Llama-3-8B",
+        retrievedAt: "2026-10-24"
+      }
+    },
+    {
+      id: "llama4-maverick",
+      name: "Llama 4 Maverick 17B-128E (MoE, VLM)",
+      family: "Llama",
+      category: "vlm",
+      paramsB: 400,
+      activeParamsB: 17,
+      layers: 48,
+      hiddenDim: 5120,
+      qHeads: 40,
+      kvHeads: 8,
+      headDim: 128,
+      vocabSize: 202000,
+      maxContext: 1e6,
+      isMoE: true,
+      lifecycle: "active",
+      provenance: {
+        source: "model-card",
+        sourceUrl: "https://huggingface.co/meta-llama/Llama-4-Scout-17B-16E-Instruct"
+      }
+    },
+    {
+      id: "llama4-scout",
+      name: "Llama 4 Scout 17B-16E (MoE, VLM)",
+      family: "Llama",
+      category: "vlm",
+      paramsB: 109,
+      activeParamsB: 17,
+      layers: 48,
+      hiddenDim: 5120,
+      qHeads: 40,
+      kvHeads: 8,
+      headDim: 128,
+      vocabSize: 202000,
+      maxContext: 1e7,
+      isMoE: true,
+      lifecycle: "active",
+      provenance: {
+        source: "model-card",
+        sourceUrl: "https://huggingface.co/meta-llama/Llama-4-Scout-17B-16E-Instruct"
+      }
+    },
+    {
+      id: "mistral-7b",
+      name: "Mistral 7B v0.3",
+      family: "Mistral",
+      category: "text",
+      paramsB: 7.24,
+      activeParamsB: 7.24,
+      layers: 32,
+      hiddenDim: 4096,
+      qHeads: 32,
+      kvHeads: 8,
+      headDim: 128,
+      vocabSize: 32768,
+      maxContext: 32768,
+      isMoE: false,
+      lifecycle: "active",
+      provenance: {
+        source: "model-card",
+        sourceUrl: "https://huggingface.co/mistralai/Mistral-7B-v0.3",
+        retrievedAt: "2026-10-24"
+      }
+    },
+    {
+      id: "mistral-large-3",
+      name: "Mistral Large 3 (256K)",
+      family: "Mistral",
+      category: "text",
+      paramsB: 235,
+      activeParamsB: 71,
+      layers: 78,
+      hiddenDim: 7168,
+      qHeads: 56,
+      kvHeads: 8,
+      headDim: 128,
+      vocabSize: 131072,
+      maxContext: 262144,
+      isMoE: true,
+      lifecycle: "active",
+      provenance: {
+        source: "model-card",
+        sourceUrl: "https://docs.mistral.ai/models/mistral-large-3-25-12"
+      }
+    },
+    {
+      id: "mixtral-8x22b",
+      name: "Mixtral 8x22B (MoE)",
+      family: "Mistral",
+      category: "text",
+      paramsB: 141,
+      activeParamsB: 39,
+      layers: 56,
+      hiddenDim: 6144,
+      qHeads: 48,
+      kvHeads: 8,
+      headDim: 128,
+      vocabSize: 32000,
+      maxContext: 65536,
+      isMoE: true,
+      lifecycle: "active",
+      provenance: {
+        source: "model-card",
+        sourceUrl: "https://huggingface.co/mistralai/Mixtral-8x22B-v0.1",
+        retrievedAt: "2026-10-24"
+      }
+    },
+    {
+      id: "mixtral-8x7b",
+      name: "Mixtral 8x7B (MoE)",
+      family: "Mistral",
+      category: "text",
+      paramsB: 46.7,
+      activeParamsB: 12.9,
+      layers: 32,
+      hiddenDim: 4096,
+      qHeads: 32,
+      kvHeads: 8,
+      headDim: 128,
+      vocabSize: 32000,
+      maxContext: 32768,
+      isMoE: true,
+      lifecycle: "active",
+      provenance: {
+        source: "model-card",
+        sourceUrl: "https://huggingface.co/mistralai/Mixtral-8x7B-v0.1",
+        retrievedAt: "2026-10-24"
+      }
+    },
+    {
+      id: "olmo2-13b",
+      name: "OLMo 2 13B",
+      family: "AllenAI",
+      category: "text",
+      paramsB: 13,
+      activeParamsB: 13,
+      layers: 40,
+      hiddenDim: 5120,
+      qHeads: 40,
+      kvHeads: 8,
+      headDim: 128,
+      vocabSize: 50281,
+      maxContext: 4096,
+      isMoE: false,
+      lifecycle: "active",
+      provenance: {
+        source: "model-card",
+        sourceUrl: "https://huggingface.co/allenai/OLMo-2-1124-13B-Instruct",
+        retrievedAt: "2026-10-24"
+      }
+    },
+    {
+      id: "phi3-7b",
+      name: "Phi-3 Mini 3.8B",
+      family: "Phi",
+      category: "text",
+      paramsB: 3.8,
+      activeParamsB: 3.8,
+      layers: 32,
+      hiddenDim: 3072,
+      qHeads: 32,
+      kvHeads: 32,
+      headDim: 96,
+      vocabSize: 32000,
+      maxContext: 4096,
+      isMoE: false,
+      lifecycle: "active",
+      provenance: {
+        source: "model-card",
+        sourceUrl: "https://huggingface.co/microsoft/Phi-3-mini-4k-instruct",
+        retrievedAt: "2026-10-24"
+      }
+    },
+    {
+      id: "phi4-14b",
+      name: "Phi-4 14B",
+      family: "Phi",
+      category: "text",
+      paramsB: 14,
+      activeParamsB: 14,
+      layers: 40,
+      hiddenDim: 5120,
+      qHeads: 32,
+      kvHeads: 8,
+      headDim: 128,
+      vocabSize: 100352,
+      maxContext: 16384,
+      isMoE: false,
+      lifecycle: "active",
+      provenance: {
+        source: "model-card",
+        sourceUrl: "https://huggingface.co/microsoft/phi-4",
+        retrievedAt: "2026-10-24"
+      }
+    },
+    {
+      id: "pixtral-12b",
+      name: "Pixtral 12B (VLM)",
+      family: "Mistral",
+      category: "vlm",
+      paramsB: 12,
+      activeParamsB: 12,
+      layers: 40,
+      hiddenDim: 5120,
+      qHeads: 32,
+      kvHeads: 8,
+      headDim: 128,
+      vocabSize: 131072,
+      maxContext: 131072,
+      isMoE: false,
+      lifecycle: "active",
+      provenance: {
+        source: "model-card",
+        sourceUrl: "https://huggingface.co/mistralai/Pixtral-12B-2409",
+        retrievedAt: "2026-10-24"
+      }
+    },
+    {
+      id: "qwen2-5-14b",
+      name: "Qwen 2.5 14B",
+      family: "Qwen",
+      category: "text",
+      paramsB: 14,
+      activeParamsB: 14,
+      layers: 48,
+      hiddenDim: 5120,
+      qHeads: 40,
+      kvHeads: 8,
+      headDim: 128,
+      vocabSize: 152064,
+      maxContext: 131072,
+      isMoE: false,
+      lifecycle: "active",
+      provenance: {
+        source: "model-card",
+        sourceUrl: "https://huggingface.co/Qwen/Qwen2.5-14B-Instruct",
+        retrievedAt: "2026-10-24"
+      }
+    },
+    {
+      id: "qwen2-5-72b",
+      name: "Qwen 2.5 72B",
+      family: "Qwen",
+      category: "text",
+      paramsB: 72.7,
+      activeParamsB: 72.7,
+      layers: 80,
+      hiddenDim: 8192,
+      qHeads: 64,
+      kvHeads: 8,
+      headDim: 128,
+      vocabSize: 152064,
+      maxContext: 131072,
+      isMoE: false,
+      lifecycle: "active",
+      provenance: {
+        source: "model-card",
+        sourceUrl: "https://huggingface.co/Qwen/Qwen2.5-72B-Instruct",
+        retrievedAt: "2026-10-24"
+      }
+    },
+    {
+      id: "qwen2-5-vl-72b",
+      name: "Qwen 2.5-VL 72B (VLM)",
+      family: "Qwen",
+      category: "vlm",
+      paramsB: 72,
+      activeParamsB: 72,
+      layers: 80,
+      hiddenDim: 8192,
+      qHeads: 64,
+      kvHeads: 8,
+      headDim: 128,
+      vocabSize: 152064,
+      maxContext: 128000,
+      isMoE: false,
+      lifecycle: "active",
+      provenance: {
+        source: "model-card",
+        sourceUrl: "https://huggingface.co/Qwen/Qwen2.5-VL-72B-Instruct",
+        retrievedAt: "2026-10-24"
+      }
+    },
+    {
+      id: "qwen2-5-vl-7b",
+      name: "Qwen 2.5-VL 7B (VLM)",
+      family: "Qwen",
+      category: "vlm",
+      paramsB: 7,
+      activeParamsB: 7,
+      layers: 28,
+      hiddenDim: 3584,
+      qHeads: 28,
+      kvHeads: 4,
+      headDim: 128,
+      vocabSize: 152064,
+      maxContext: 128000,
+      isMoE: false,
+      lifecycle: "active",
+      provenance: {
+        source: "model-card",
+        sourceUrl: "https://huggingface.co/Qwen/Qwen2.5-VL-7B-Instruct",
+        retrievedAt: "2026-10-24"
+      }
+    },
+    {
+      id: "qwen2-72b",
+      name: "Qwen2 72B",
+      family: "Qwen",
+      category: "text",
+      paramsB: 72.7,
+      activeParamsB: 72.7,
+      layers: 80,
+      hiddenDim: 8192,
+      qHeads: 64,
+      kvHeads: 8,
+      headDim: 128,
+      vocabSize: 152064,
+      maxContext: 32768,
+      isMoE: false,
+      lifecycle: "active",
+      provenance: {
+        source: "model-card",
+        sourceUrl: "https://huggingface.co/Qwen/Qwen2-72B-Instruct",
+        retrievedAt: "2026-10-24"
+      }
+    },
+    {
+      id: "qwen2-7b",
+      name: "Qwen2 7B",
+      family: "Qwen",
+      category: "text",
+      paramsB: 7.62,
+      activeParamsB: 7.62,
+      layers: 28,
+      hiddenDim: 3584,
+      qHeads: 28,
+      kvHeads: 4,
+      headDim: 128,
+      vocabSize: 152064,
+      maxContext: 32768,
+      isMoE: false,
+      lifecycle: "active",
+      provenance: {
+        source: "model-card",
+        sourceUrl: "https://huggingface.co/Qwen/Qwen2-7B-Instruct",
+        retrievedAt: "2026-10-24"
+      }
+    },
+    {
+      id: "qwen3-14b",
+      name: "Qwen 3 14B",
+      family: "Qwen",
+      category: "text",
+      paramsB: 14,
+      activeParamsB: 14,
+      layers: 40,
+      hiddenDim: 5120,
+      qHeads: 40,
+      kvHeads: 8,
+      headDim: 128,
+      vocabSize: 151936,
+      maxContext: 40960,
+      isMoE: false,
+      lifecycle: "active",
+      provenance: {
+        source: "model-card",
+        sourceUrl: "https://huggingface.co/Qwen/Qwen3-14B",
+        retrievedAt: "2026-10-24"
+      }
+    },
+    {
+      id: "qwen3-235b-a22b",
+      name: "Qwen 3 235B-A22B (MoE)",
+      family: "Qwen",
+      category: "text",
+      paramsB: 235,
+      activeParamsB: 22,
+      layers: 94,
+      hiddenDim: 4096,
+      qHeads: 64,
+      kvHeads: 4,
+      headDim: 128,
+      vocabSize: 151936,
+      maxContext: 40960,
+      isMoE: true,
+      lifecycle: "active",
+      provenance: {
+        source: "model-card",
+        sourceUrl: "https://huggingface.co/Qwen/Qwen3-235B-A22B",
+        retrievedAt: "2026-10-24"
+      }
+    },
+    {
+      id: "qwen3-30b-a3b",
+      name: "Qwen 3 30B-A3B (MoE)",
+      family: "Qwen",
+      category: "text",
+      paramsB: 30,
+      activeParamsB: 3,
+      layers: 48,
+      hiddenDim: 2048,
+      qHeads: 32,
+      kvHeads: 4,
+      headDim: 128,
+      vocabSize: 151936,
+      maxContext: 40960,
+      isMoE: true,
+      lifecycle: "active",
+      provenance: {
+        source: "model-card",
+        sourceUrl: "https://huggingface.co/Qwen/Qwen3-30B-A3B",
+        retrievedAt: "2026-10-24"
+      }
+    },
+    {
+      id: "qwen3-32b",
+      name: "Qwen 3 32B",
+      family: "Qwen",
+      category: "text",
+      paramsB: 32,
+      activeParamsB: 32,
+      layers: 64,
+      hiddenDim: 5120,
+      qHeads: 64,
+      kvHeads: 8,
+      headDim: 128,
+      vocabSize: 151936,
+      maxContext: 40960,
+      isMoE: false,
+      lifecycle: "active",
+      provenance: {
+        source: "model-card",
+        sourceUrl: "https://huggingface.co/Qwen/Qwen3-32B",
+        retrievedAt: "2026-10-24"
+      }
+    },
+    {
+      id: "qwen3-4b",
+      name: "Qwen 3 4B",
+      family: "Qwen",
+      category: "text",
+      paramsB: 4,
+      activeParamsB: 4,
+      layers: 36,
+      hiddenDim: 2560,
+      qHeads: 32,
+      kvHeads: 8,
+      headDim: 128,
+      vocabSize: 151936,
+      maxContext: 40960,
+      isMoE: false,
+      lifecycle: "active",
+      provenance: {
+        source: "model-card",
+        sourceUrl: "https://huggingface.co/Qwen/Qwen3-4B",
+        retrievedAt: "2026-10-24"
+      }
+    },
+    {
+      id: "qwen3-8-27b",
+      name: "Qwen3.8 27B (VLM)",
+      family: "Qwen",
+      category: "vlm",
+      paramsB: 27.781,
+      activeParamsB: 27.781,
+      layers: 64,
+      hiddenDim: 5120,
+      qHeads: 24,
+      kvHeads: 4,
+      headDim: 256,
+      vocabSize: 248320,
+      maxContext: 262144,
+      isMoE: false,
+      attentionLayers: [
+        {
+          kind: "linear",
+          stateBytes: 3145728
+        },
+        {
+          kind: "linear",
+          stateBytes: 3145728
+        },
+        {
+          kind: "linear",
+          stateBytes: 3145728
+        },
+        {
+          kind: "full"
+        },
+        {
+          kind: "linear",
+          stateBytes: 3145728
+        },
+        {
+          kind: "linear",
+          stateBytes: 3145728
+        },
+        {
+          kind: "linear",
+          stateBytes: 3145728
+        },
+        {
+          kind: "full"
+        },
+        {
+          kind: "linear",
+          stateBytes: 3145728
+        },
+        {
+          kind: "linear",
+          stateBytes: 3145728
+        },
+        {
+          kind: "linear",
+          stateBytes: 3145728
+        },
+        {
+          kind: "full"
+        },
+        {
+          kind: "linear",
+          stateBytes: 3145728
+        },
+        {
+          kind: "linear",
+          stateBytes: 3145728
+        },
+        {
+          kind: "linear",
+          stateBytes: 3145728
+        },
+        {
+          kind: "full"
+        },
+        {
+          kind: "linear",
+          stateBytes: 3145728
+        },
+        {
+          kind: "linear",
+          stateBytes: 3145728
+        },
+        {
+          kind: "linear",
+          stateBytes: 3145728
+        },
+        {
+          kind: "full"
+        },
+        {
+          kind: "linear",
+          stateBytes: 3145728
+        },
+        {
+          kind: "linear",
+          stateBytes: 3145728
+        },
+        {
+          kind: "linear",
+          stateBytes: 3145728
+        },
+        {
+          kind: "full"
+        },
+        {
+          kind: "linear",
+          stateBytes: 3145728
+        },
+        {
+          kind: "linear",
+          stateBytes: 3145728
+        },
+        {
+          kind: "linear",
+          stateBytes: 3145728
+        },
+        {
+          kind: "full"
+        },
+        {
+          kind: "linear",
+          stateBytes: 3145728
+        },
+        {
+          kind: "linear",
+          stateBytes: 3145728
+        },
+        {
+          kind: "linear",
+          stateBytes: 3145728
+        },
+        {
+          kind: "full"
+        },
+        {
+          kind: "linear",
+          stateBytes: 3145728
+        },
+        {
+          kind: "linear",
+          stateBytes: 3145728
+        },
+        {
+          kind: "linear",
+          stateBytes: 3145728
+        },
+        {
+          kind: "full"
+        },
+        {
+          kind: "linear",
+          stateBytes: 3145728
+        },
+        {
+          kind: "linear",
+          stateBytes: 3145728
+        },
+        {
+          kind: "linear",
+          stateBytes: 3145728
+        },
+        {
+          kind: "full"
+        },
+        {
+          kind: "linear",
+          stateBytes: 3145728
+        },
+        {
+          kind: "linear",
+          stateBytes: 3145728
+        },
+        {
+          kind: "linear",
+          stateBytes: 3145728
+        },
+        {
+          kind: "full"
+        },
+        {
+          kind: "linear",
+          stateBytes: 3145728
+        },
+        {
+          kind: "linear",
+          stateBytes: 3145728
+        },
+        {
+          kind: "linear",
+          stateBytes: 3145728
+        },
+        {
+          kind: "full"
+        },
+        {
+          kind: "linear",
+          stateBytes: 3145728
+        },
+        {
+          kind: "linear",
+          stateBytes: 3145728
+        },
+        {
+          kind: "linear",
+          stateBytes: 3145728
+        },
+        {
+          kind: "full"
+        },
+        {
+          kind: "linear",
+          stateBytes: 3145728
+        },
+        {
+          kind: "linear",
+          stateBytes: 3145728
+        },
+        {
+          kind: "linear",
+          stateBytes: 3145728
+        },
+        {
+          kind: "full"
+        },
+        {
+          kind: "linear",
+          stateBytes: 3145728
+        },
+        {
+          kind: "linear",
+          stateBytes: 3145728
+        },
+        {
+          kind: "linear",
+          stateBytes: 3145728
+        },
+        {
+          kind: "full"
+        },
+        {
+          kind: "linear",
+          stateBytes: 3145728
+        },
+        {
+          kind: "linear",
+          stateBytes: 3145728
+        },
+        {
+          kind: "linear",
+          stateBytes: 3145728
+        },
+        {
+          kind: "full"
+        }
+      ],
+      architectureStatus: "supported",
+      residentWeightBytes: 55562855904,
+      repository: "Qwen/Qwen3.8-27B",
+      revision: "1d4bf0f2ff6012fd82039f2fa52739d0dd7c60c0",
+      nativeWeightFormat: "bfloat16",
+      lifecycle: "active",
+      provenance: {
+        source: "hf-config",
+        sourceUrl: "https://huggingface.co/Qwen/Qwen3.8-27B",
+        retrievedAt: "2026-10-24",
+        notes: "Architecture derived from config.json at revision 1d4bf0f2ff6012fd82039f2fa52739d0dd7c60c0. Resident weight bytes (55,562,855,904) measured from model.safetensors.index.json total_size. Total parameter count (27,781,427,952) from the HuggingFace model API safetensors metadata. Checkpoint carries 1 multi-token-prediction head layer(s). These are a draft head, not part of the per-token decode path, so they are not counted as active parameters."
+      },
+      license: "apache-2.0"
+    },
+    {
+      id: "qwen3-8b",
+      name: "Qwen 3 8B",
+      family: "Qwen",
+      category: "text",
+      paramsB: 8,
+      activeParamsB: 8,
+      layers: 36,
+      hiddenDim: 4096,
+      qHeads: 32,
+      kvHeads: 8,
+      headDim: 128,
+      vocabSize: 151936,
+      maxContext: 40960,
+      isMoE: false,
+      lifecycle: "active",
+      provenance: {
+        source: "model-card",
+        sourceUrl: "https://huggingface.co/Qwen/Qwen3-8B",
+        retrievedAt: "2026-10-24"
+      }
+    },
+    {
+      id: "smollm2-1.7b",
+      name: "SmolLM2 1.7B Instruct",
+      family: "HuggingFaceTB",
+      category: "text",
+      paramsB: 1.7,
+      activeParamsB: 1.7,
+      layers: 24,
+      hiddenDim: 2048,
+      qHeads: 32,
+      kvHeads: 32,
+      headDim: 64,
+      vocabSize: 128256,
+      maxContext: 8192,
+      isMoE: false,
+      lifecycle: "active",
+      provenance: {
+        source: "model-card",
+        sourceUrl: "https://huggingface.co/HuggingFaceTB/SmolLM2-1.7B-Instruct",
+        retrievedAt: "2026-10-24"
+      }
+    }
+  ]
+};
+// ../../catalog/accelerators.json
+var accelerators_default = {
+  records: [
+    {
+      id: "h100-sxm",
+      name: "H100 SXM5 80GB",
+      vendor: "NVIDIA",
+      category: "datacenter",
+      memBandwidthGbps: 3350,
+      flopsTflops: 990,
+      vramGb: 80,
+      nvlinkGbps: 900,
+      usdPerHour: 2.5,
+      year: 2022,
+      lifecycle: "active",
+      provenance: {
+        source: "vendor-spec",
+        sourceUrl: "https://www.nvidia.com/en-us/data-center/h100"
+      }
+    },
+    {
+      id: "h100-pcie",
+      name: "H100 PCIe 80GB",
+      vendor: "NVIDIA",
+      category: "datacenter",
+      memBandwidthGbps: 2000,
+      flopsTflops: 756,
+      vramGb: 80,
+      nvlinkGbps: 0,
+      usdPerHour: 2,
+      year: 2023,
+      lifecycle: "active",
+      provenance: {
+        source: "vendor-spec",
+        sourceUrl: "https://www.nvidia.com/en-us/data-center/h100"
+      }
+    },
+    {
+      id: "h200-sxm",
+      name: "H200 SXM5 141GB",
+      vendor: "NVIDIA",
+      category: "datacenter",
+      memBandwidthGbps: 4800,
+      flopsTflops: 990,
+      vramGb: 141,
+      nvlinkGbps: 900,
+      usdPerHour: 4,
+      year: 2024,
+      lifecycle: "active",
+      provenance: {
+        source: "vendor-spec",
+        sourceUrl: "https://www.nvidia.com/en-us/data-center/h200"
+      }
+    },
+    {
+      id: "b200-sxm",
+      name: "B200 SXM 192GB",
+      vendor: "NVIDIA",
+      category: "datacenter",
+      memBandwidthGbps: 8000,
+      flopsTflops: null,
+      vramGb: 192,
+      nvlinkGbps: 1800,
+      usdPerHour: 6,
+      year: 2025,
+      lifecycle: "active",
+      provenance: {
+        source: "vendor-spec",
+        sourceUrl: "https://www.nvidia.com/en-us/data-center/blackwell-architecture"
+      },
+      note: "FP4/FP8 specs only; FP16 dense not publicly reported"
+    },
+    {
+      id: "b300-sxm",
+      name: "B300 SXM 288GB",
+      vendor: "NVIDIA",
+      category: "datacenter",
+      memBandwidthGbps: 8000,
+      flopsTflops: null,
+      vramGb: 288,
+      nvlinkGbps: 1800,
+      usdPerHour: 8,
+      year: 2025,
+      lifecycle: "active",
+      provenance: {
+        source: "vendor-spec",
+        sourceUrl: "https://www.nvidia.com/en-us/data-center/dgx-b300"
+      },
+      note: "Announced; FP16 dense not published"
+    },
+    {
+      id: "a100-80",
+      name: "A100 80GB SXM4",
+      vendor: "NVIDIA",
+      category: "datacenter",
+      memBandwidthGbps: 2000,
+      flopsTflops: 312,
+      vramGb: 80,
+      nvlinkGbps: 600,
+      usdPerHour: 1.2,
+      year: 2020,
+      lifecycle: "active",
+      provenance: {
+        source: "vendor-spec",
+        sourceUrl: "https://www.nvidia.com/en-us/data-center/a100"
+      }
+    },
+    {
+      id: "a100-40",
+      name: "A100 40GB SXM4",
+      vendor: "NVIDIA",
+      category: "datacenter",
+      memBandwidthGbps: 1550,
+      flopsTflops: 312,
+      vramGb: 40,
+      nvlinkGbps: 600,
+      usdPerHour: 0.9,
+      year: 2020,
+      lifecycle: "active",
+      provenance: {
+        source: "vendor-spec",
+        sourceUrl: "https://www.nvidia.com/en-us/data-center/a100"
+      }
+    },
+    {
+      id: "l40s",
+      name: "L40S 48GB",
+      vendor: "NVIDIA",
+      category: "datacenter",
+      memBandwidthGbps: 864,
+      flopsTflops: 91.6,
+      vramGb: 48,
+      nvlinkGbps: 0,
+      usdPerHour: 0.7,
+      year: 2023,
+      lifecycle: "active",
+      provenance: {
+        source: "vendor-spec",
+        sourceUrl: "https://www.nvidia.com/en-us/data-center/l40s"
+      }
+    },
+    {
+      id: "a10g",
+      name: "A10G 24GB",
+      vendor: "NVIDIA",
+      category: "datacenter",
+      memBandwidthGbps: 600,
+      flopsTflops: 31,
+      vramGb: 24,
+      nvlinkGbps: 0,
+      usdPerHour: 0.36,
+      year: 2021,
+      lifecycle: "active",
+      provenance: {
+        source: "vendor-spec",
+        sourceUrl: "https://www.nvidia.com/content/dam/en-zz/Solutions/Data-Center/a10/pdf/a10-datasheet.pdf",
+        retrievedAt: "2026-10-24"
+      },
+      sourceUrl: "https://www.nvidia.com/content/dam/en-zz/Solutions/Data-Center/a10/pdf/a10-datasheet.pdf"
+    },
+    {
+      id: "t4",
+      name: "T4 16GB",
+      vendor: "NVIDIA",
+      category: "datacenter",
+      memBandwidthGbps: 320,
+      flopsTflops: 8.1,
+      vramGb: 16,
+      nvlinkGbps: 0,
+      usdPerHour: 0.2,
+      year: 2018,
+      lifecycle: "active",
+      provenance: {
+        source: "vendor-spec",
+        sourceUrl: "https://www.nvidia.com/en-us/data-center/tesla-t4/",
+        retrievedAt: "2026-10-24"
+      },
+      sourceUrl: "https://www.nvidia.com/en-us/data-center/tesla-t4/"
+    },
+    {
+      id: "v100",
+      name: "V100 SXM2 32GB",
+      vendor: "NVIDIA",
+      category: "legacy",
+      memBandwidthGbps: 900,
+      flopsTflops: 125,
+      vramGb: 32,
+      nvlinkGbps: 300,
+      usdPerHour: 0.5,
+      year: 2017,
+      lifecycle: "active",
+      provenance: {
+        source: "vendor-spec",
+        sourceUrl: "https://www.nvidia.com/en-us/data-center/",
+        retrievedAt: "2026-10-24"
+      },
+      note: "Legacy architecture (Volta)",
+      sourceUrl: "https://www.nvidia.com/en-us/data-center/"
+    },
+    {
+      id: "l4",
+      name: "L4 24GB",
+      vendor: "NVIDIA",
+      category: "workstation",
+      memBandwidthGbps: 300,
+      flopsTflops: 30.3,
+      vramGb: 24,
+      nvlinkGbps: 0,
+      usdPerHour: 0.4,
+      year: 2023,
+      lifecycle: "active",
+      provenance: {
+        source: "vendor-spec",
+        sourceUrl: "https://www.nvidia.com/en-us/data-center/l4/",
+        retrievedAt: "2026-10-24"
+      },
+      sourceUrl: "https://www.nvidia.com/en-us/data-center/l4/"
+    },
+    {
+      id: "rtx-6000a",
+      name: "RTX 6000 Ada 48GB",
+      vendor: "NVIDIA",
+      category: "workstation",
+      memBandwidthGbps: 960,
+      flopsTflops: 91.6,
+      vramGb: 48,
+      nvlinkGbps: 0,
+      usdPerHour: 0.8,
+      year: 2022,
+      lifecycle: "active",
+      provenance: {
+        source: "vendor-spec",
+        sourceUrl: "https://www.nvidia.com/en-us/products/workstations/rtx-6000/",
+        retrievedAt: "2026-10-24"
+      },
+      sourceUrl: "https://www.nvidia.com/en-us/products/workstations/rtx-6000/"
+    },
+    {
+      id: "rtx-pro-6000-bw",
+      name: "RTX PRO 6000 Blackwell 96GB",
+      vendor: "NVIDIA",
+      category: "workstation",
+      memBandwidthGbps: 1792,
+      flopsTflops: 125,
+      vramGb: 96,
+      nvlinkGbps: 0,
+      usdPerHour: 1.5,
+      year: 2025,
+      lifecycle: "active",
+      provenance: {
+        source: "vendor-spec",
+        sourceUrl: "https://www.nvidia.com/en-us/products/workstations/professional-desktop-gpus/rtx-pro-6000-family"
+      }
+    },
+    {
+      id: "a4000",
+      name: "RTX A4000 16GB",
+      vendor: "NVIDIA",
+      category: "workstation",
+      memBandwidthGbps: 448,
+      flopsTflops: 19.5,
+      vramGb: 16,
+      nvlinkGbps: 0,
+      usdPerHour: 0.3,
+      year: 2021,
+      lifecycle: "active",
+      provenance: {
+        source: "vendor-spec",
+        sourceUrl: "https://www.nvidia.com/en-us/products/workstations/rtx-a4000/",
+        retrievedAt: "2026-10-24"
+      },
+      sourceUrl: "https://www.nvidia.com/en-us/products/workstations/rtx-a4000/"
+    },
+    {
+      id: "rtx-5090",
+      name: "RTX 5090 32GB",
+      vendor: "NVIDIA",
+      category: "consumer",
+      memBandwidthGbps: 1792,
+      flopsTflops: 105,
+      vramGb: 32,
+      nvlinkGbps: 0,
+      usdPerHour: 0.5,
+      year: 2025,
+      lifecycle: "active",
+      provenance: {
+        source: "vendor-spec",
+        sourceUrl: "https://www.nvidia.com/en-us/geforce/graphics-cards/50-series"
+      }
+    },
+    {
+      id: "rtx-4090",
+      name: "RTX 4090 24GB",
+      vendor: "NVIDIA",
+      category: "consumer",
+      memBandwidthGbps: 1008,
+      flopsTflops: 82.6,
+      vramGb: 24,
+      nvlinkGbps: 0,
+      usdPerHour: 0.4,
+      year: 2022,
+      lifecycle: "active",
+      provenance: {
+        source: "vendor-spec",
+        sourceUrl: "https://www.nvidia.com/en-us/geforce/graphics-cards/40-series/rtx-4090/",
+        retrievedAt: "2026-10-24"
+      },
+      sourceUrl: "https://www.nvidia.com/en-us/geforce/graphics-cards/40-series/rtx-4090/"
+    },
+    {
+      id: "rtx-3090",
+      name: "RTX 3090 24GB",
+      vendor: "NVIDIA",
+      category: "consumer",
+      memBandwidthGbps: 936,
+      flopsTflops: 35.6,
+      vramGb: 24,
+      nvlinkGbps: 0,
+      usdPerHour: 0.25,
+      year: 2020,
+      lifecycle: "active",
+      provenance: {
+        source: "vendor-spec",
+        sourceUrl: "https://www.nvidia.com/en-us/geforce/graphics-cards/30-series/rtx-3090/",
+        retrievedAt: "2026-10-24"
+      },
+      sourceUrl: "https://www.nvidia.com/en-us/geforce/graphics-cards/30-series/rtx-3090/"
+    },
+    {
+      id: "rtx-4080",
+      name: "RTX 4080 16GB",
+      vendor: "NVIDIA",
+      category: "consumer",
+      memBandwidthGbps: 717,
+      flopsTflops: 48.7,
+      vramGb: 16,
+      nvlinkGbps: 0,
+      usdPerHour: 0.3,
+      year: 2022,
+      lifecycle: "active",
+      provenance: {
+        source: "vendor-spec",
+        sourceUrl: "https://www.nvidia.com/en-us/geforce/graphics-cards/40-series/rtx-4080-family/",
+        retrievedAt: "2026-10-24"
+      },
+      sourceUrl: "https://www.nvidia.com/en-us/geforce/graphics-cards/40-series/rtx-4080-family/"
+    },
+    {
+      id: "rtx-3080",
+      name: "RTX 3080 10GB",
+      vendor: "NVIDIA",
+      category: "consumer",
+      memBandwidthGbps: 760,
+      flopsTflops: 34.1,
+      vramGb: 10,
+      nvlinkGbps: 0,
+      usdPerHour: 0.2,
+      year: 2020,
+      lifecycle: "active",
+      provenance: {
+        source: "vendor-spec",
+        sourceUrl: "https://www.nvidia.com/en-us/geforce/graphics-cards/30-series/rtx-3080-3080ti/",
+        retrievedAt: "2026-10-24"
+      },
+      sourceUrl: "https://www.nvidia.com/en-us/geforce/graphics-cards/30-series/rtx-3080-3080ti/"
+    },
+    {
+      id: "mi300x",
+      name: "AMD MI300X 192GB",
+      vendor: "AMD",
+      category: "datacenter",
+      memBandwidthGbps: 5300,
+      flopsTflops: 1307,
+      vramGb: 192,
+      nvlinkGbps: 0,
+      usdPerHour: 2.5,
+      year: 2023,
+      lifecycle: "active",
+      provenance: {
+        source: "vendor-spec",
+        sourceUrl: "https://www.amd.com/en/products/accelerators/instinct/mi300/mi300x.html"
+      },
+      note: "ROCm; performance depends on ROCm version"
+    },
+    {
+      id: "mi325x",
+      name: "AMD MI325X 288GB",
+      vendor: "AMD",
+      category: "datacenter",
+      memBandwidthGbps: 6000,
+      flopsTflops: 1307,
+      vramGb: 288,
+      nvlinkGbps: 0,
+      usdPerHour: 3.5,
+      year: 2024,
+      lifecycle: "active",
+      provenance: {
+        source: "vendor-spec",
+        sourceUrl: "https://www.amd.com/en/products/accelerators/instinct.html"
+      }
+    },
+    {
+      id: "gaudi3",
+      name: "Intel Gaudi 3 128GB",
+      vendor: "Intel",
+      category: "datacenter",
+      memBandwidthGbps: 3300,
+      flopsTflops: 1835,
+      vramGb: 128,
+      nvlinkGbps: 0,
+      usdPerHour: 2,
+      year: 2024,
+      lifecycle: "active",
+      provenance: {
+        source: "vendor-spec",
+        sourceUrl: "https://www.intel.com/content/www/us/en/products/details/processors/ai-accelerators/gaudi.html"
+      },
+      note: "Ethernet scale-out; not drop-in for CUDA"
+    },
+    {
+      id: "tpu-v5p",
+      name: "TPU v5p (per-chip, 95GB)",
+      vendor: "Google",
+      category: "tpu",
+      memBandwidthGbps: 819,
+      flopsTflops: 459,
+      vramGb: 95,
+      nvlinkGbps: 0,
+      usdPerHour: 4.2,
+      year: 2023,
+      lifecycle: "active",
+      provenance: {
+        source: "vendor-spec",
+        sourceUrl: "https://cloud.google.com/tpu/docs"
+      },
+      note: "Pod-scale; per-chip specs only"
+    },
+    {
+      id: "tpu-trillium",
+      name: "TPU v6e Trillium (32GB)",
+      vendor: "Google",
+      category: "tpu",
+      memBandwidthGbps: 819,
+      flopsTflops: 918,
+      vramGb: 32,
+      nvlinkGbps: 0,
+      usdPerHour: 0.8,
+      year: 2024,
+      lifecycle: "active",
+      provenance: {
+        source: "vendor-spec",
+        sourceUrl: "https://cloud.google.com/tpu/docs"
+      }
+    },
+    {
+      id: "groq-lpu",
+      name: "GroqLPU (per-chip, 230MB SRAM)",
+      vendor: "Groq",
+      category: "lpu",
+      memBandwidthGbps: 9000,
+      flopsTflops: 750,
+      vramGb: 0.23,
+      nvlinkGbps: 0,
+      usdPerHour: null,
+      year: 2024,
+      lifecycle: "active",
+      provenance: {
+        source: "vendor-spec",
+        sourceUrl: "https://groq.com"
+      },
+      note: "LPU architecture; SRAM-based, very different from HBM GPUs. Use cited model-specific benchmarks."
+    },
+    {
+      id: "cerebras-cs3",
+      name: "Cerebras CS-3 (WSE-3)",
+      vendor: "Cerebras",
+      category: "wse",
+      memBandwidthGbps: 20000,
+      flopsTflops: 1250,
+      vramGb: 44,
+      nvlinkGbps: 0,
+      usdPerHour: null,
+      year: 2024,
+      lifecycle: "active",
+      provenance: {
+        source: "vendor-spec",
+        sourceUrl: "https://www.cerebras.ai"
+      },
+      note: "Wafer-scale; not comparable to per-GPU specs. Use cited benchmarks."
+    },
+    {
+      id: "m2u-800",
+      name: "Mac M2 Ultra (192GB unified)",
+      vendor: "Apple",
+      category: "mac",
+      memBandwidthGbps: 800,
+      flopsTflops: 27,
+      vramGb: 192,
+      nvlinkGbps: 0,
+      usdPerHour: 0,
+      year: 2023,
+      lifecycle: "active",
+      provenance: {
+        source: "vendor-spec",
+        sourceUrl: "https://www.apple.com/mac-studio/specs/",
+        retrievedAt: "2026-10-24"
+      },
+      note: "Unified memory; purchased hardware, not rentable. Legacy id 'm2u-800' refers to the 800 GB/s memory bandwidth, not VRAM.",
+      sourceUrl: "https://www.apple.com/mac-studio/specs/"
+    },
+    {
+      id: "m2u-192",
+      name: "Mac M2 Ultra (192GB)",
+      vendor: "Apple",
+      category: "mac",
+      memBandwidthGbps: 800,
+      flopsTflops: 27,
+      vramGb: 192,
+      nvlinkGbps: 0,
+      usdPerHour: 0,
+      year: 2023,
+      lifecycle: "active",
+      provenance: {
+        source: "vendor-spec",
+        sourceUrl: "https://www.apple.com/mac-studio/specs/",
+        retrievedAt: "2026-10-24"
+      },
+      note: "Unified memory",
+      sourceUrl: "https://www.apple.com/mac-studio/specs/"
+    },
+    {
+      id: "m3max-64",
+      name: "Mac M3 Max (64GB)",
+      vendor: "Apple",
+      category: "mac",
+      memBandwidthGbps: 400,
+      flopsTflops: 14,
+      vramGb: 64,
+      nvlinkGbps: 0,
+      usdPerHour: 0,
+      year: 2023,
+      lifecycle: "active",
+      provenance: {
+        source: "vendor-spec",
+        sourceUrl: "https://www.apple.com/macbook-pro/specs/",
+        retrievedAt: "2026-10-24"
+      },
+      note: "Unified memory",
+      sourceUrl: "https://www.apple.com/macbook-pro/specs/"
+    },
+    {
+      id: "m4max-128",
+      name: "Mac M4 Max (128GB)",
+      vendor: "Apple",
+      category: "mac",
+      memBandwidthGbps: 546,
+      flopsTflops: 17,
+      vramGb: 128,
+      nvlinkGbps: 0,
+      usdPerHour: 0,
+      year: 2024,
+      lifecycle: "active",
+      provenance: {
+        source: "vendor-spec",
+        sourceUrl: "https://www.apple.com/macbook-pro/specs/",
+        retrievedAt: "2026-10-24"
+      },
+      note: "Unified memory",
+      sourceUrl: "https://www.apple.com/macbook-pro/specs/"
+    }
+  ]
+};
+// ../../catalog/quantizations.json
+var quantizations_default = {
+  records: [
+    {
+      id: "fp32",
+      label: "FP32 (raw)",
+      bytesPerParam: 4,
+      efficiency: 1,
+      family: "float",
+      description: "32-bit float. Highest accuracy, 2x size of FP16.",
+      lifecycle: "active",
+      provenance: {
+        source: "unspecified"
+      }
+    },
+    {
+      id: "fp16",
+      label: "FP16",
+      bytesPerParam: 2,
+      efficiency: 1,
+      family: "float",
+      description: "16-bit float. Standard for inference, no dequant overhead.",
+      lifecycle: "active",
+      provenance: {
+        source: "unspecified"
+      }
+    },
+    {
+      id: "bf16",
+      label: "BF16",
+      bytesPerParam: 2,
+      efficiency: 1,
+      family: "float",
+      description: "Brain Float 16. Same size as FP16, better numerical range.",
+      lifecycle: "active",
+      provenance: {
+        source: "unspecified"
+      }
+    },
+    {
+      id: "int8",
+      label: "INT8",
+      bytesPerParam: 1,
+      efficiency: 0.88,
+      family: "float",
+      description: "8-bit integer. Halves memory, ~12% dequant overhead.",
+      lifecycle: "active",
+      provenance: {
+        source: "unspecified"
+      }
+    },
+    {
+      id: "int4",
+      label: "INT4 (generic)",
+      bytesPerParam: 0.5,
+      efficiency: 0.8,
+      family: "float",
+      description: "4-bit integer (generic). For specific format, pick GPTQ-4 / AWQ-4 / GGUF Q4_K_M.",
+      lifecycle: "active",
+      provenance: {
+        source: "unspecified"
+      }
+    },
+    {
+      id: "gguf-q2k",
+      label: "GGUF Q2_K",
+      bytesPerParam: 0.37,
+      efficiency: 0.92,
+      family: "gguf",
+      description: "~2.6 bpw effective. Smallest; significant accuracy loss, use only as last resort.",
+      lifecycle: "active",
+      provenance: {
+        source: "vendor-spec",
+        sourceUrl: "https://github.com/ggml-org/llama.cpp/blob/master/tools/quantize/README.md"
+      },
+      useCase: "Extreme low-memory edge devices"
+    },
+    {
+      id: "gguf-q3km",
+      label: "GGUF Q3_K_M",
+      bytesPerParam: 0.42,
+      efficiency: 0.93,
+      family: "gguf",
+      description: "~3.9 bpw. Low quality; acceptable for some chat uses but not coding/math.",
+      lifecycle: "active",
+      provenance: {
+        source: "vendor-spec",
+        sourceUrl: "https://github.com/ggml-org/llama.cpp/blob/master/tools/quantize/README.md"
+      },
+      useCase: "Low-memory local inference"
+    },
+    {
+      id: "gguf-q4km",
+      label: "GGUF Q4_K_M",
+      bytesPerParam: 0.55,
+      efficiency: 0.9,
+      family: "gguf",
+      description: "~4.8 bpw. Recommended sweet spot for local Llama/Mistral on consumer GPUs.",
+      lifecycle: "active",
+      provenance: {
+        source: "vendor-spec",
+        sourceUrl: "https://github.com/ggml-org/llama.cpp/blob/master/tools/quantize/README.md"
+      },
+      useCase: "Recommended for local inference"
+    },
+    {
+      id: "gguf-q5km",
+      label: "GGUF Q5_K_M",
+      bytesPerParam: 0.68,
+      efficiency: 0.92,
+      family: "gguf",
+      description: "~5.7 bpw. Higher quality than Q4, ~30% larger. Good when memory allows.",
+      lifecycle: "active",
+      provenance: {
+        source: "vendor-spec",
+        sourceUrl: "https://github.com/ggml-org/llama.cpp/blob/master/tools/quantize/README.md"
+      },
+      useCase: "Quality-focused local inference"
+    },
+    {
+      id: "gguf-q6k",
+      label: "GGUF Q6_K",
+      bytesPerParam: 0.82,
+      efficiency: 0.95,
+      family: "gguf",
+      description: "~6.6 bpw. Near-FP16 quality, ~60% larger than Q4_K_M.",
+      lifecycle: "active",
+      provenance: {
+        source: "vendor-spec",
+        sourceUrl: "https://github.com/ggml-org/llama.cpp/blob/master/tools/quantize/README.md"
+      },
+      useCase: "Near-lossless local inference"
+    },
+    {
+      id: "gguf-q8",
+      label: "GGUF Q8_0",
+      bytesPerParam: 1.07,
+      efficiency: 0.98,
+      family: "gguf",
+      description: "~8.5 bpw. Effectively lossless, ~half the size of FP16.",
+      lifecycle: "active",
+      provenance: {
+        source: "vendor-spec",
+        sourceUrl: "https://github.com/ggml-org/llama.cpp/blob/master/tools/quantize/README.md"
+      },
+      useCase: "Reference / lossless storage"
+    },
+    {
+      id: "gptq4",
+      label: "GPTQ 4-bit",
+      bytesPerParam: 0.55,
+      efficiency: 0.85,
+      family: "gptq",
+      description: "Post-training 4-bit weight quant. Supported by vLLM, TGI, TensorRT-LLM (varies by version).",
+      lifecycle: "active",
+      provenance: {
+        source: "unspecified"
+      },
+      useCase: "vLLM/TGI serverless"
+    },
+    {
+      id: "awq4",
+      label: "AWQ 4-bit",
+      bytesPerParam: 0.55,
+      efficiency: 0.88,
+      family: "awq",
+      description: "Activation-aware W4A16. Preserves salient weights; better accuracy than GPTQ in some setups.",
+      lifecycle: "active",
+      provenance: {
+        source: "unspecified"
+      },
+      useCase: "vLLM/TensorRT-LLM serving"
+    },
+    {
+      id: "exl2-6bpw",
+      label: "EXL2 6.0 bpw",
+      bytesPerParam: 0.75,
+      efficiency: 0.92,
+      family: "exl2",
+      description: "Mixed-bit quantization for ExLlamaV2. Common 6.0 bpw preset balances speed/quality on consumer NVIDIA.",
+      lifecycle: "active",
+      provenance: {
+        source: "unspecified"
+      },
+      useCase: "Consumer NVIDIA + ExLlamaV2"
+    },
+    {
+      id: "fp8",
+      label: "FP8 (E4M3)",
+      bytesPerParam: 1,
+      efficiency: 1.5,
+      family: "fp8",
+      description: "8-bit floating-point. Native on H100/H200 — FASTER than FP16 (efficiency >1). Same VRAM as INT8 but better quality.",
+      lifecycle: "active",
+      provenance: {
+        source: "unspecified"
+      },
+      useCase: "H100/H200 with TRT-LLM/vLLM"
+    },
+    {
+      id: "nvfp4",
+      label: "NVFP4 (Blackwell)",
+      bytesPerParam: 0.5,
+      efficiency: 1.2,
+      family: "nvfp4",
+      description: "4-bit floating-point with block scaling. Native on Blackwell (B200/B300). Roughly 2x faster than FP8 on B200 in cited tests.",
+      lifecycle: "active",
+      provenance: {
+        source: "unspecified"
+      },
+      useCase: "Blackwell B200/B300 only"
+    }
+  ]
+};
+// ../../catalog/manifest.json
+var manifest_default = {
+  catalogVersion: "0.4.0",
+  description: "tokcalc model / accelerator / quantization catalog. JSON records are the source of truth; src/catalog/loader.ts is the one loader used by the website, the MCP server and the CLI.",
+  updatedAt: "2026-10-24",
+  files: {
+    models: "models.json",
+    accelerators: "accelerators.json",
+    quantizations: "quantizations.json"
+  },
+  counts: {
+    models: 44,
+    accelerators: 31,
+    quantizations: 16
+  }
+};
+
+// ../../src/catalog/loader.ts
+var CATALOG_MANIFEST = manifest_default;
+var CATALOG_VERSION = CATALOG_MANIFEST.catalogVersion;
+function takeRecords(file, label) {
+  if (!file || typeof file !== "object" || !Array.isArray(file.records)) {
+    throw new Error(`catalog: ${label}.json is malformed — expected an object with a "records" array`);
+  }
+  return file.records;
+}
+function assertUniqueIds(records, label) {
+  const seen = new Set;
+  const dupes = new Set;
+  for (const r of records) {
+    if (seen.has(r.id))
+      dupes.add(r.id);
+    seen.add(r.id);
+  }
+  if (dupes.size > 0) {
+    throw new Error(`catalog: duplicate ${label} id(s): ${[...dupes].join(", ")} — ids must be unique`);
+  }
+}
+var MODELS = takeRecords(models_default, "models");
+var ACCELERATORS = takeRecords(accelerators_default, "accelerators");
+var QUANTIZATIONS = takeRecords(quantizations_default, "quantizations");
+assertUniqueIds(MODELS, "model");
+assertUniqueIds(ACCELERATORS, "accelerator");
+assertUniqueIds(QUANTIZATIONS, "quantization");
+{
+  const drift = [];
+  const check = (label, declared, actual) => {
+    if (declared !== actual)
+      drift.push(`${label}: manifest says ${declared}, file has ${actual}`);
+  };
+  check("models", CATALOG_MANIFEST.counts.models, MODELS.length);
+  check("accelerators", CATALOG_MANIFEST.counts.accelerators, ACCELERATORS.length);
+  check("quantizations", CATALOG_MANIFEST.counts.quantizations, QUANTIZATIONS.length);
+  if (drift.length > 0) {
+    throw new Error(`catalog: manifest counts are stale — ${drift.join("; ")}. Update catalog/manifest.json.`);
+  }
+}
 var MODEL_MAP = Object.fromEntries(MODELS.map((m) => [m.id, m]));
+var ACCELERATOR_MAP = Object.fromEntries(ACCELERATORS.map((g) => [g.id, g]));
+var QUANT_MAP = Object.fromEntries(QUANTIZATIONS.map((q) => [q.id, q]));
+
+// ../../src/lib/token-calc.ts
 var ETA_MEM = 0.65;
 var ETA_COMPUTE = 0.5;
 var ETA_NVLINK = 0.85;
 var KERNEL_OVERHEAD_MS = 30;
+var FIRST_ANSWER_TOKENS = 12;
 var DEFAULT_BATCHING_MULTIPLIER = 1.5;
 var ANTHROPIC_CACHE_WRITE_5M = 1.25;
 var ANTHROPIC_CACHE_WRITE_1H = 2;
@@ -26331,7 +29338,7 @@ var ANTHROPIC_CACHE_READ = 0.1;
 var OPENAI_CACHE_DISCOUNT = 0.5;
 function calculate(input) {
   const model = MODEL_MAP[input.modelId];
-  const gpu = GPU_MAP[input.gpuId];
+  const gpu = ACCELERATOR_MAP[input.gpuId];
   const quant = QUANT_MAP[input.quantization];
   if (!model)
     throw new Error(`Unknown model: ${input.modelId}`);
@@ -26349,10 +29356,11 @@ function calculate(input) {
   const effectiveBandwidthGbps = gpu.memBandwidthGbps * tp * effMem * multiGpuEfficiency;
   const gpuFlops = gpu.flopsTflops ?? 1500;
   const effectiveFlopsTflops = gpuFlops * tp * effCompute;
-  const kvBytesPerToken = 2 * model.layers * model.kvHeads * model.headDim * 2;
-  const kvCachePerTokenKb = kvBytesPerToken / 1024;
   const totalContextTokens = input.promptTokens + (input.cachePrefixTokens ?? 0);
-  const kvCacheTotalGb = kvBytesPerToken * totalContextTokens * input.batchSize / 1e9;
+  const kvBytesPerToken = computeKVBytesPerToken(model, 2, totalContextTokens);
+  const kvCachePerTokenKb = kvBytesPerToken / 1024;
+  const stateBytes = computeStateBytes(model);
+  const kvCacheTotalGb = (kvBytesPerToken * totalContextTokens * input.batchSize + stateBytes * input.batchSize) / 1e9;
   const totalVramNeededGb = residentWeightsGb + kvCacheTotalGb;
   const vramFits = totalVramNeededGb <= gpu.vramGb * tp;
   const decodeTokensPerSecRaw = effectiveBandwidthGbps / activeParamsGb * quantEff * speculativeBoost;
@@ -26381,6 +29389,8 @@ function calculate(input) {
   const cacheSavingsPct = totalContextTokens > 0 ? prefillTokensAvoided / totalContextTokens * 100 : 0;
   const prefillTimeMs = input.promptTokens > 0 ? input.useContinuousBatching || cachePrefixTokens > 0 ? prefillTimeWithCacheMs : input.promptTokens / prefillTokensPerSec * 1000 : 0;
   const decodeTimePerTokenMs = decodeTokensPerSec > 0 ? 1000 / decodeTokensPerSec : Infinity;
+  const ttftMs = prefillTimeMs + decodeTimePerTokenMs + KERNEL_OVERHEAD_MS;
+  const firstAnswerLatencyMs = prefillTimeMs + FIRST_ANSWER_TOKENS * decodeTimePerTokenMs + KERNEL_OVERHEAD_MS;
   const reasoningTokens = input.reasoningTokens ?? 0;
   const billedOutputTokens = input.outputTokens + reasoningTokens;
   const totalDecodeTimeMs = billedOutputTokens * decodeTimePerTokenMs;
@@ -26401,6 +29411,7 @@ function calculate(input) {
     isMoE: model.isMoE,
     kvCachePerTokenKb,
     kvCacheTotalGb,
+    stateBytesGb: stateBytes * input.batchSize / 1e9,
     totalVramNeededGb,
     vramFits,
     decodeTokensPerSec,
@@ -26412,8 +29423,9 @@ function calculate(input) {
     totalDecodeTimeMs,
     totalLatencyMs,
     endToEndTokensPerSec,
-    ttftMs: prefillTimeMs,
+    ttftMs,
     itlMs: decodeTimePerTokenMs,
+    firstAnswerLatencyMs,
     billedOutputTokens,
     cacheHitRate,
     cachePrefixTokens,
@@ -26438,28 +29450,29 @@ function calculate(input) {
     longContextWarning,
     confidence: {
       decodeTokensPerSec: "modeled",
-      aggregateTokensPerSec: continuousBatchingMultiplier > 1 ? "inferred" : "modeled",
-      prefillTokensPerSec: totalContextTokens > 32768 ? "inferred" : "modeled",
+      aggregateTokensPerSec: continuousBatchingMultiplier > 1 ? "heuristic" : "modeled",
+      prefillTokensPerSec: totalContextTokens > 32768 ? "heuristic" : "modeled",
       batchCrossover: "modeled",
-      prefillTimeMs: totalContextTokens > 32768 ? "inferred" : "modeled",
+      prefillTimeMs: totalContextTokens > 32768 ? "heuristic" : "modeled",
       decodeTimePerTokenMs: "modeled",
-      totalLatencyMs: totalContextTokens > 32768 ? "inferred" : "modeled",
-      ttftMs: totalContextTokens > 32768 ? "inferred" : "modeled",
+      totalLatencyMs: totalContextTokens > 32768 ? "heuristic" : "modeled",
+      ttftMs: totalContextTokens > 32768 ? "heuristic" : "modeled",
       itlMs: "modeled",
+      firstAnswerLatencyMs: "modeled",
       modelSizeGb: "modeled",
       kvCacheTotalGb: "modeled",
       totalVramNeededGb: "modeled",
       vramFits: "modeled",
-      costPerHour: input.gpuHourlyCost !== undefined ? "user-supplied" : "measured",
+      costPerHour: input.gpuHourlyCost !== undefined ? "user_supplied" : "published_price",
       costPerMillionOutputTokens: "modeled",
       costPerRequest: "modeled",
       cacheSavingsPct: "modeled",
       prefillTokensAvoided: "modeled",
-      cacheWriteCostMultiplier: "measured",
-      cacheReadCostMultiplier: "measured",
-      billedOutputTokens: "user-supplied",
-      effectiveBandwidthGbps: "measured",
-      effectiveFlopsTflops: gpu.flopsTflops === null ? "inferred" : "measured"
+      cacheWriteCostMultiplier: "published_price",
+      cacheReadCostMultiplier: "published_price",
+      billedOutputTokens: "user_supplied",
+      effectiveBandwidthGbps: "modeled",
+      effectiveFlopsTflops: gpu.flopsTflops === null ? "heuristic" : "modeled"
     }
   };
 }
@@ -26501,16 +29514,59 @@ function fmtMoney(n) {
     return "$" + n.toFixed(4);
   return "$" + n.toFixed(6);
 }
-function computeKVBytesPerToken(model, bytesPerKVValue = 2) {
-  return 2 * model.layers * model.kvHeads * model.headDim * bytesPerKVValue;
+function computeKVBytesPerToken(model, bytesPerKVValue = 2, contextTokens = 0) {
+  if (!model.attentionLayers) {
+    return 2 * model.layers * model.kvHeads * model.headDim * bytesPerKVValue;
+  }
+  let total = 0;
+  for (const layer of model.attentionLayers) {
+    switch (layer.kind) {
+      case "full":
+        total += 2 * model.kvHeads * model.headDim * bytesPerKVValue;
+        break;
+      case "sliding": {
+        const perToken = 2 * model.kvHeads * model.headDim * bytesPerKVValue;
+        const window = layer.windowTokens ?? 0;
+        if (contextTokens > 0 && window > 0) {
+          total += perToken * Math.min(1, window / contextTokens);
+        } else {
+          total += perToken;
+        }
+        break;
+      }
+      case "mla": {
+        const latent = layer.kvLoraRank ?? model.kvHeads * model.headDim;
+        const rope = layer.mlaRopeHeadDim ?? 0;
+        total += (latent + rope) * bytesPerKVValue;
+        break;
+      }
+      case "linear":
+      case "kda":
+        break;
+    }
+  }
+  return total;
+}
+function computeStateBytes(model) {
+  if (!model.attentionLayers)
+    return 0;
+  let total = 0;
+  for (const layer of model.attentionLayers) {
+    if (layer.kind === "linear" || layer.kind === "kda") {
+      total += layer.stateBytes ?? 0;
+    }
+  }
+  return total;
 }
 function computeKVCacheGb(model, contextTokens, batchSize = 1, bytesPerKVValue = 2) {
-  const bytes = computeKVBytesPerToken(model, bytesPerKVValue) * contextTokens * batchSize;
+  const perToken = computeKVBytesPerToken(model, bytesPerKVValue, contextTokens);
+  const state = computeStateBytes(model);
+  const bytes = perToken * contextTokens * batchSize + state * batchSize;
   return bytes / 1e9;
 }
 function computeMaxConcurrency(model, gpu, numGpus, contextTokens, quantBytesPerParam, bytesPerKVValue = 2) {
   const weightsBytes = model.paramsB * 1e9 * quantBytesPerParam;
-  const kvBytesPerRequest = computeKVBytesPerToken(model, bytesPerKVValue) * contextTokens;
+  const kvBytesPerRequest = computeKVBytesPerToken(model, bytesPerKVValue, contextTokens) * contextTokens + computeStateBytes(model);
   const totalVramBytes = gpu.vramGb * numGpus * 1e9;
   const availableKvBytes = totalVramBytes - weightsBytes;
   if (availableKvBytes <= 0 || kvBytesPerRequest <= 0)
@@ -26597,7 +29653,7 @@ function createMlperfRecord(params) {
     continuousBatchingMultiplier: 2
   });
   const model = MODEL_MAP[modelId];
-  const gpu = GPU_MAP[gpuId];
+  const gpu = ACCELERATOR_MAP[gpuId];
   const quant = QUANT_MAP[quantization];
   return {
     benchmark_id: generateBenchmarkId(),
@@ -26791,7 +29847,7 @@ var MLPERF_CURATED = [
 
 // ../../src/lib/mcp-version.ts
 var MCP_SERVER_VERSION = "0.3.3";
-var CATALOG_VERSION = "0.3.0";
+var CATALOG_VERSION2 = "0.4.0";
 
 // ../../src/lib/mcp-store.ts
 import fs from "node:fs";
@@ -26892,7 +29948,7 @@ function withProvenance(result) {
     ...result,
     provenance: {
       serverVersion: MCP_SERVER_VERSION,
-      catalogVersion: CATALOG_VERSION,
+      catalogVersion: CATALOG_VERSION2,
       buildStamp: `tokcalc-mcp/${MCP_SERVER_VERSION}`
     }
   };
@@ -27070,7 +30126,7 @@ function handleEstimateCapacity(input) {
     cacheHitRate: input.cacheHitRate
   });
   const model = MODEL_MAP[input.model];
-  const gpu = GPU_MAP[input.gpu];
+  const gpu = ACCELERATOR_MAP[input.gpu];
   if (input.contextTokens !== undefined && model) {
     if (input.contextTokens > model.maxContext) {
       return {
@@ -27117,6 +30173,7 @@ function handleEstimateCapacity(input) {
       },
       aggregateTokensPerSecond: Math.round(result.aggregateTokensPerSec),
       ttftMs: { expected: Math.round(result.ttftMs) },
+      firstAnswerLatencyMs: Math.round(result.firstAnswerLatencyMs),
       itlMs: { expected: Math.round(result.itlMs) },
       totalLatencyMs: Math.round(result.totalLatencyMs)
     },
@@ -27126,6 +30183,7 @@ function handleEstimateCapacity(input) {
       isMoE: result.isMoE ?? model?.isMoE ?? false,
       weightsNote: result.isMoE ?? model?.isMoE ? "MoE: modelWeightsGb is ALL experts resident in VRAM. activeParamsGb is the per-token working set used for the bandwidth math. They differ by ~10x — use modelWeightsGb for capacity, activeParamsGb for speed." : "Dense model: modelWeightsGb equals activeParamsGb.",
       kvCacheGb: +result.kvCacheTotalGb.toFixed(2),
+      stateBytesGb: +result.stateBytesGb.toFixed(2),
       kvQuantization: input.kvQuantization,
       totalRequiredGb: +result.totalVramNeededGb.toFixed(2),
       availableGb: gpu ? gpu.vramGb * input.gpuCount : 0,
@@ -27153,7 +30211,7 @@ function handleEstimateCapacity(input) {
       ...input.cachePrefixTokens ? [`Prefix caching: ${input.cachePrefixTokens} tokens at ${Math.round((input.cacheHitRate ?? 0) * 100)}% hit rate`] : [],
       `These are planning estimates, not deployment guarantees`
     ],
-    catalogVersion: CATALOG_VERSION
+    catalogVersion: CATALOG_VERSION2
   };
 }
 function handleCompareGpus(input) {
@@ -27161,14 +30219,14 @@ function handleCompareGpus(input) {
   const quant = QUANT_MAP[input.quantization];
   if (!model || !quant)
     return { error: "Unknown model or quantization", models: Object.keys(MODEL_MAP).slice(0, 10) };
-  let candidatePool = GPUS;
+  let candidatePool = ACCELERATORS;
   if (input.gpus && input.gpus.length > 0) {
     const requested = new Set(input.gpus);
-    candidatePool = GPUS.filter((g) => requested.has(g.id));
+    candidatePool = ACCELERATORS.filter((g) => requested.has(g.id));
     if (candidatePool.length === 0) {
       return {
         error: `No GPUs matched gpus=[${input.gpus.join(", ")}]. Call list_gpus to find valid IDs.`,
-        validGpuIds: GPUS.slice(0, 10).map((g) => g.id)
+        validGpuIds: ACCELERATORS.slice(0, 10).map((g) => g.id)
       };
     }
   }
@@ -27236,7 +30294,7 @@ function handleCompareGpus(input) {
       note: "First row reflects sortBy; it is only the cheapest when sortBy='lowest_cost'."
     },
     skippedNoPrice: skippedNoPrice.length > 0 ? skippedNoPrice : undefined,
-    assumptions: [`Region: us-east-1 (default)`, `On-demand pricing`, `η_mem = 0.65`, `Catalog version: ${CATALOG_VERSION}`]
+    assumptions: [`Region: us-east-1 (default)`, `On-demand pricing`, `η_mem = 0.65`, `Catalog version: ${CATALOG_VERSION2}`]
   };
 }
 function handleRecommendTopology(input) {
@@ -27255,7 +30313,7 @@ function handleRecommendTopology(input) {
   const kvPerRequest = computeKVCacheGb(model, input.contextTokens, 1);
   const kvPerBatch = computeKVCacheGb(model, input.contextTokens, input.batchSize);
   const residentWeightsGb = model.paramsB * quant.bytesPerParam;
-  const results = GPUS.map((g) => {
+  const results = ACCELERATORS.map((g) => {
     const rec = recommendTopology(model, g, input.contextTokens, input.batchSize, quant.bytesPerParam);
     const maxConcurrent = rec.neededGpus > 0 ? computeMaxConcurrency(model, g, rec.neededGpus, input.contextTokens, quant.bytesPerParam) : 0;
     const freeGb = g.vramGb * rec.neededGpus - residentWeightsGb;
@@ -27279,7 +30337,7 @@ function handleRecommendTopology(input) {
     };
   }).filter((r) => r.fits).slice(0, 5);
   return {
-    summary: `For ${model.name} at ${fmtContext(input.contextTokens)} context (batch=${input.batchSize}): ${results.length} feasible topology options across ${GPUS.length} GPUs.`,
+    summary: `For ${model.name} at ${fmtContext(input.contextTokens)} context (batch=${input.batchSize}): ${results.length} feasible topology options across ${ACCELERATORS.length} GPUs.`,
     model: { name: model.name, paramsB: model.paramsB, activeParamsB: model.activeParamsB, isMoE: model.isMoE },
     context: { tokens: input.contextTokens, label: fmtContext(input.contextTokens), batchSize: input.batchSize },
     recommendations: results,
@@ -27290,7 +30348,7 @@ function handleRecommendTopology(input) {
       `Model weights (${residentWeightsGb.toFixed(1)} GB, full paramsB${model.isMoE ? " — all MoE experts resident" : ""}) + KV × batchSize must fit in total VRAM`,
       `maxConcurrentUsers is concurrent single-slot requests at this context; concurrent batches = maxConcurrentUsers ÷ ${input.batchSize}`,
       `maxConcurrentUsers is an upper bound: it excludes runtime overhead (activations, CUDA context, allocator slack)`,
-      `Catalog version: ${CATALOG_VERSION}`
+      `Catalog version: ${CATALOG_VERSION2}`
     ]
   };
 }
@@ -27305,7 +30363,7 @@ function handleEstimateApiVsSelfHost(input) {
     promptTokens: input.inputTokens,
     outputTokens: input.outputTokens
   });
-  const gpu = GPU_MAP[input.gpu];
+  const gpu = ACCELERATOR_MAP[input.gpu];
   const model = MODEL_MAP[input.model];
   if (!sh.vramFits) {
     return {
@@ -27360,7 +30418,7 @@ function handleEstimateApiVsSelfHost(input) {
       `API pricing: $${input.apiInputPrice}/M input, $${input.apiOutputPrice}/M output → $${apiBlendedCostPerM.toFixed(2)}/M blended at this token mix`,
       `Break-even uses API cost only; it excludes self-host ops, power beyond the GPU-hour rate, and engineering time`,
       `730 hours/month`,
-      `Catalog version: ${CATALOG_VERSION}`
+      `Catalog version: ${CATALOG_VERSION2}`
     ]
   };
 }
@@ -27383,13 +30441,28 @@ function handleListModels(input) {
       activeParamsB: m.activeParamsB,
       isMoE: m.isMoE,
       layers: m.layers,
-      maxContext: m.maxContext
+      maxContext: m.maxContext,
+      attentionKinds: attentionKindSummary(m),
+      architectureStatus: m.architectureStatus ?? "supported",
+      nativeWeightFormat: m.nativeWeightFormat ?? null,
+      residentWeightBytes: m.residentWeightBytes ?? null,
+      license: m.license ?? null,
+      repository: m.repository ?? null
     })),
-    catalogVersion: CATALOG_VERSION
+    catalogVersion: CATALOG_VERSION2
   };
 }
+function attentionKindSummary(model) {
+  if (!model.attentionLayers)
+    return "full";
+  const counts = new Map;
+  for (const l of model.attentionLayers)
+    counts.set(l.kind, (counts.get(l.kind) ?? 0) + 1);
+  const ORDER = ["full", "sliding", "linear", "kda", "mla"];
+  return ORDER.filter((k) => counts.has(k)).map((k) => `${counts.get(k)} ${k}`).join(" + ");
+}
 function handleListGpus(input) {
-  let filtered = GPUS;
+  let filtered = ACCELERATORS;
   if (input.vendor)
     filtered = filtered.filter((g) => g.vendor === input.vendor);
   if (input.category)
@@ -27413,7 +30486,7 @@ function handleListGpus(input) {
       year: g.year,
       note: g.note
     })),
-    catalogVersion: CATALOG_VERSION
+    catalogVersion: CATALOG_VERSION2
   };
 }
 function handleGetMlperfBenchmarks(input) {
@@ -27447,7 +30520,7 @@ function handleGetMlperfBenchmarks(input) {
       source_url: r.source_url
     })),
     note: "Throughput values are COMPUTED by tokcalc formulas (confidence_tier=derived). System configurations are sourced from MLPerf Inference v4.1 audited submissions.",
-    catalogVersion: CATALOG_VERSION
+    catalogVersion: CATALOG_VERSION2
   };
 }
 function handleFindConfigForSlo(input) {
@@ -27468,7 +30541,7 @@ function handleFindConfigForSlo(input) {
   const requiredTps = tokensPerRequest * input.requestsPerDay / 86400;
   const candidates = [];
   const rejectedBy = { ttft: 0, cost: 0, throughput: 0, noPrice: 0, undersized: 0 };
-  for (const g of GPUS) {
+  for (const g of ACCELERATORS) {
     for (const tp of [1, 2, 4, 8]) {
       if (g.usdPerHour == null || g.usdPerHour <= 0) {
         rejectedBy.noPrice++;
@@ -27586,12 +30659,12 @@ function handleFindConfigForSlo(input) {
       "best_value credit-caps throughput at 2× the mean load, so oversized rigs don't win on paper efficiency; configs that cannot sustain the mean load rank below those that can.",
       "TTFT uses the core engine's compute-bound prefill model at the given TP degree."
     ],
-    assumptions: [`η_mem = 0.65`, `η_compute = 0.50`, `On-demand pricing, us-east-1 defaults`, `Catalog version: ${CATALOG_VERSION}`]
+    assumptions: [`η_mem = 0.65`, `η_compute = 0.50`, `On-demand pricing, us-east-1 defaults`, `Catalog version: ${CATALOG_VERSION2}`]
   };
 }
 function handlePlanDeployment(input) {
   const model = MODEL_MAP[input.model];
-  const gpu = GPU_MAP[input.gpu];
+  const gpu = ACCELERATOR_MAP[input.gpu];
   const quant = QUANT_MAP[input.quantization];
   if (!model)
     return { error: `Unknown model: ${input.model}. Call list_models to see valid IDs.` };
@@ -27711,7 +30784,7 @@ function handlePlanDeployment(input) {
       `KV cache in FP16`,
       `730 hours/month; on-demand pricing`,
       `Break-even uses API cost only (no self-host ops overhead)`,
-      `Catalog version: ${CATALOG_VERSION}`
+      `Catalog version: ${CATALOG_VERSION2}`
     ]
   };
 }
@@ -27811,7 +30884,7 @@ async function handleFetchModelSpec(input) {
       hfMapped,
       comparison: compareSpecs(catalog, hfMapped),
       note: "Served from the local 24h spec cache. Use forceRefresh=true to re-fetch.",
-      catalogVersion: CATALOG_VERSION
+      catalogVersion: CATALOG_VERSION2
     };
   }
   try {
@@ -27842,7 +30915,7 @@ async function handleFetchModelSpec(input) {
       comparison: compareSpecs(catalog, hfMapped),
       cache: written ? { stored: true, persistent, ttlHours: 24, note: persistent ? "Cached for 24h in ~/.tokcalc/model-specs/." : "Cached to a temp dir (read-only home) — will not survive a restart." } : { stored: false, note: "Filesystem unavailable — fetched live, not cached." },
       note: "Verify catalog drift before sizing hardware: layers, kvHeads and headDim drive the KV-cache formula (2 × L × H_kv × D_h × 2 bytes).",
-      catalogVersion: CATALOG_VERSION
+      catalogVersion: CATALOG_VERSION2
     };
   } catch (err) {
     if (cached && cached.hfRepo === repo) {
@@ -27857,13 +30930,13 @@ async function handleFetchModelSpec(input) {
         catalog,
         hfMapped: null,
         comparison: null,
-        catalogVersion: CATALOG_VERSION
+        catalogVersion: CATALOG_VERSION2
       };
     }
     return {
       error: `Failed to fetch ${hfUrl}: ${err instanceof Error ? err.message : String(err)}`,
       suggestion: "Check the repo id, network access, or pass hfRepo explicitly. Offline? The catalog remains fully usable via the other tools.",
-      catalogVersion: CATALOG_VERSION
+      catalogVersion: CATALOG_VERSION2
     };
   }
 }
@@ -27898,7 +30971,7 @@ function compareSpecs(catalog, hf) {
 }
 function handleRecordMeasured(input) {
   const model = MODEL_MAP[input.model];
-  const gpu = GPU_MAP[input.gpu];
+  const gpu = ACCELERATOR_MAP[input.gpu];
   if (!model)
     return { error: `Unknown model: ${input.model}. Call list_models to see valid IDs.` };
   if (!gpu)
@@ -27965,67 +31038,95 @@ function handleRecordMeasured(input) {
     persistent: write.ok && storeIsPersistent(),
     recordsForThisConfig: totalForCell,
     note: write.ok ? storeIsPersistent() ? "estimate_capacity and find_config_for_slo now annotate results for this model+GPU+quantization cell with your measured/predicted ratio." : "Stored to a temp dir (home dir unavailable) — this calibration will NOT survive a restart." : "Could not store the measurement (filesystem unavailable); returning the comparison only — nothing was persisted.",
-    assumptions: [`Ratios are per model+GPU+quantization cell; the most recent record wins.`, `Catalog version: ${CATALOG_VERSION}`]
+    assumptions: [`Ratios are per model+GPU+quantization cell; the most recent record wins.`, `Catalog version: ${CATALOG_VERSION2}`]
   };
 }
+var READ_ONLY = (title) => ({
+  title,
+  readOnlyHint: true,
+  destructiveHint: false,
+  idempotentHint: true,
+  openWorldHint: false
+});
 var TOOL_DEFINITIONS = [
   {
     name: "estimate_capacity",
     description: "Estimate whether an LLM-serving configuration fits in memory and can meet throughput and latency targets. Returns VRAM/KV-cache breakdown, throughput and latency ranges, concurrency, cost, confidence, assumptions, and sources.",
-    inputSchema: formatInputSchema(EstimateCapacitySchema)
+    inputSchema: formatInputSchema(EstimateCapacitySchema),
+    annotations: READ_ONLY("Estimate serving capacity")
   },
   {
     name: "compare_gpus",
     description: "Compare supported GPU or cloud SKU options for the same LLM workload. Use before recommending hardware.",
-    inputSchema: formatInputSchema(CompareGpusSchema)
+    inputSchema: formatInputSchema(CompareGpusSchema),
+    annotations: READ_ONLY("Compare accelerators")
   },
   {
     name: "recommend_topology",
     description: "Recommend feasible GPU/topology designs including tensor parallelism and context parallel (RingAttention) when needed.",
-    inputSchema: formatInputSchema(RecommendTopologySchema)
+    inputSchema: formatInputSchema(RecommendTopologySchema),
+    annotations: READ_ONLY("Recommend GPU topology")
   },
   {
     name: "estimate_api_vs_self_host",
     description: "Compare monthly token-based API costs with self-hosted GPU infrastructure under stated utilization assumptions.",
-    inputSchema: formatInputSchema(EstimateApiVsSelfHostSchema)
+    inputSchema: formatInputSchema(EstimateApiVsSelfHostSchema),
+    annotations: READ_ONLY("Compare API vs self-host")
   },
   {
     name: "list_models",
     description: "List tokcalc-supported model IDs and metadata. Use before estimating if the requested model is ambiguous or unknown.",
-    inputSchema: formatInputSchema(ListModelsSchema)
+    inputSchema: formatInputSchema(ListModelsSchema),
+    annotations: READ_ONLY("List supported models")
   },
   {
     name: "list_gpus",
     description: "List GPU and cloud SKU IDs, memory, bandwidth, pricing, and categories.",
-    inputSchema: formatInputSchema(ListGpusSchema)
+    inputSchema: formatInputSchema(ListGpusSchema),
+    annotations: READ_ONLY("List supported accelerators")
   },
   {
     name: "get_mlperf_benchmarks",
     description: "Retrieve curated MLPerf Inference v4.1 LLM benchmark reference configurations. Throughput is computed by tokcalc formulas (confidence_tier=derived). Use to cross-validate theoretical estimates against audited system configurations.",
-    inputSchema: formatInputSchema(GetMlperfBenchmarksSchema)
+    inputSchema: formatInputSchema(GetMlperfBenchmarksSchema),
+    annotations: READ_ONLY("Get MLPerf reference results")
   },
   {
     name: "find_config_for_slo",
     description: "INVERSE planner: given model + context + traffic volume + optional TTFT/cost/throughput ceilings, search every GPU × topology (1/2/4/8 GPUs) and return feasible configurations ranked by cost, throughput, or value. Use when the user knows their SLOs but not the hardware.",
-    inputSchema: formatInputSchema(FindConfigForSloSchema)
+    inputSchema: formatInputSchema(FindConfigForSloSchema),
+    annotations: READ_ONLY("Find a config for an SLO")
   },
   {
     name: "plan_deployment",
     description: "One-call deployment decision brief for a specific config: memory breakdown with KV headroom, performance, rig cost, blended build-vs-buy with break-even, concrete risks (no-NVLink TP, tight headroom, long context), and next steps. Chains what would otherwise take 4 separate tool calls.",
-    inputSchema: formatInputSchema(PlanDeploymentSchema)
+    inputSchema: formatInputSchema(PlanDeploymentSchema),
+    annotations: READ_ONLY("Plan a deployment")
   },
   {
     name: "fetch_model_spec",
     description: "Fetch a model's real config.json from HuggingFace and diff it against tokcalc's catalog (layers, KV heads, head_dim, vocab, max context). Catches catalog drift before it corrupts KV-cache math. Cached 24h locally; use forceRefresh to re-fetch. Works offline via cache fallback.",
-    inputSchema: formatInputSchema(FetchModelSpecSchema)
+    inputSchema: formatInputSchema(FetchModelSpecSchema),
+    annotations: { ...READ_ONLY("Fetch upstream model spec"), openWorldHint: true }
   },
   {
     name: "record_measured",
     description: "Record a real-world measurement (observed tok/s, TTFT, ITL) for a model+GPU+quantization cell. Compares against the model's prediction, stores a measured/predicted ratio, and future estimate_capacity / find_config_for_slo results for that cell are annotated with your calibration. The estimator improves as you use it.",
-    inputSchema: formatInputSchema(RecordMeasuredSchema)
+    inputSchema: formatInputSchema(RecordMeasuredSchema),
+    annotations: {
+      title: "Record a measured benchmark",
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false
+    }
   }
 ];
-var TOOL_CATALOG = TOOL_DEFINITIONS.map((t) => ({ name: t.name, description: t.description }));
+var TOOL_CATALOG = TOOL_DEFINITIONS.map((t) => ({
+  name: t.name,
+  description: t.description,
+  annotations: t.annotations
+}));
 var TOOL_SCHEMAS = {
   estimate_capacity: EstimateCapacitySchema,
   compare_gpus: CompareGpusSchema,

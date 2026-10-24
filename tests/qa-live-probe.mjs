@@ -119,7 +119,20 @@ async function tier1() {
   });
   await check(1, "list_models / list_gpus / get_mlperf_benchmarks regressions", async () => {
     const m = await call("list_models", { isMoE: true });
-    eq(m.content.count, 10, "MoE model count");
+    // 10 legacy MoE models + 4 families added from real checkpoints
+    // (gpt-oss-20b, gpt-oss-120b, kimi-k3, glm-5-3).
+    eq(m.content.count, 14, "MoE model count");
+    const mIds = m.content.models.map(x => x.id);
+    for (const id of ["gpt-oss-20b", "gpt-oss-120b", "kimi-k3", "glm-5-3"]) {
+      assert(mIds.includes(id), `list_models is missing ${id}`);
+    }
+    // The architecture facts must reach the MCP surface — an agent that
+    // cannot see that a model's cache does not grow linearly will size it
+    // wrong.
+    const qwen = m.content.models.find(x => x.id === "gpt-oss-20b");
+    assert(qwen.attentionKinds === "12 full + 12 sliding", `gpt-oss attentionKinds=${qwen.attentionKinds}`);
+    assert(qwen.architectureStatus === "supported", `gpt-oss architectureStatus=${qwen.architectureStatus}`);
+    assert(qwen.residentWeightBytes > 0, "gpt-oss residentWeightBytes missing");
     const g = await call("list_gpus", { category: "consumer" });
     eq(g.content.count, 5, "consumer GPU count");
     const b = await call("get_mlperf_benchmarks", { gpuModel: "H100" });
