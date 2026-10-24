@@ -26268,7 +26268,11 @@ var models_default = {
         source: "model-card",
         sourceUrl: "https://huggingface.co/mistralai/Codestral-2508",
         retrievedAt: "2026-10-24",
-        notes: "The upstream repository is licence-gated: the model card is readable after accepting the licence."
+        notes: "The upstream repository is licence-gated: the model card is readable after accepting the licence.",
+        applicability: "partial",
+        limitations: [
+          "The upstream repository is licence-gated: the model card is readable only after accepting the licence, so the values were not independently diffed against a config.json."
+        ]
       }
     },
     {
@@ -26841,7 +26845,13 @@ var models_default = {
         source: "hf-config",
         sourceUrl: "https://huggingface.co/zai-org/GLM-5.3",
         retrievedAt: "2026-10-24",
-        notes: "Architecture derived from config.json at revision ba32f8c19c8738e2c57c71798c601d477a7bf844. Resident weight bytes (755,617,140,416) measured from model.safetensors.index.json total_size. Total parameter count (753,329,940,480) from the HuggingFace model API safetensors metadata. DeepSeek-style sparse attention (DSA): 78 layers carry a per-token index cache (index_n_heads=32, index_head_dim=128) that this engine does not model. Memory figures for this model UNDERSTATE the real requirement at long context; the KV cache itself (MLA) is modelled exactly. Checkpoint carries 1 multi-token-prediction head layer(s). These are a draft head, not part of the per-token decode path, so they are not counted as active parameters. Active parameter count (19.117B) taken from the model card; the checkpoint config does not state it."
+        notes: "Architecture derived from config.json at revision ba32f8c19c8738e2c57c71798c601d477a7bf844. Resident weight bytes (755,617,140,416) measured from model.safetensors.index.json total_size. Total parameter count (753,329,940,480) from the HuggingFace model API safetensors metadata. DeepSeek-style sparse attention (DSA): 78 layers carry a per-token index cache (index_n_heads=32, index_head_dim=128) that this engine does not model. Memory figures for this model UNDERSTATE the real requirement at long context; the KV cache itself (MLA) is modelled exactly. Checkpoint carries 1 multi-token-prediction head layer(s). These are a draft head, not part of the per-token decode path, so they are not counted as active parameters. Active parameter count (19.117B) taken from the model card; the checkpoint config does not state it.",
+        applicability: "lower-bound",
+        limitations: [
+          "DeepSeek-style sparse attention (DSA): 78 layers carry a per-token index cache (index_n_heads=32, index_head_dim=128) that this engine does not model, so memory figures UNDERSTATE the real requirement at long context. The MLA KV cache itself is modelled exactly.",
+          "Active parameter count (19.117B) is taken from the model card; the checkpoint config does not state it.",
+          "Checkpoint carries 1 multi-token-prediction head layer — a draft head, not part of the per-token decode path, so it is not counted as active parameters."
+        ]
       },
       license: "glm-5.3"
     },
@@ -27020,7 +27030,11 @@ var models_default = {
         source: "hf-config",
         sourceUrl: "https://huggingface.co/openai/gpt-oss-120b",
         retrievedAt: "2026-10-24",
-        notes: "Architecture derived from config.json at revision b5c939de8f754692c1647ca79fbf85e8c1e70f8a. Resident weight bytes (65,248,815,744) measured from model.safetensors.index.json total_size. Total parameter count (116,829,156,672) from the HuggingFace model API safetensors metadata. Active parameter count (5.1B) taken from the model card; the checkpoint config does not state it."
+        notes: "Architecture derived from config.json at revision b5c939de8f754692c1647ca79fbf85e8c1e70f8a. Resident weight bytes (65,248,815,744) measured from model.safetensors.index.json total_size. Total parameter count (116,829,156,672) from the HuggingFace model API safetensors metadata. Active parameter count (5.1B) taken from the model card; the checkpoint config does not state it.",
+        applicability: "partial",
+        limitations: [
+          "Active parameter count (5.1B) is taken from the model card; the checkpoint config does not state it. Weight bytes, parameter count and attention layout are exact."
+        ]
       },
       license: "apache-2.0",
       contextExtensionMethod: "RoPE scaling (yarn)",
@@ -27137,7 +27151,11 @@ var models_default = {
         source: "hf-config",
         sourceUrl: "https://huggingface.co/openai/gpt-oss-20b",
         retrievedAt: "2026-10-24",
-        notes: "Architecture derived from config.json at revision 6cee5e81ee83917806bbde320786a8fb61efebee. Resident weight bytes (13,761,264,768) measured from model.safetensors.index.json total_size. Total parameter count (20,914,757,184) from the HuggingFace model API safetensors metadata. Active parameter count (3.6B) taken from the model card; the checkpoint config does not state it."
+        notes: "Architecture derived from config.json at revision 6cee5e81ee83917806bbde320786a8fb61efebee. Resident weight bytes (13,761,264,768) measured from model.safetensors.index.json total_size. Total parameter count (20,914,757,184) from the HuggingFace model API safetensors metadata. Active parameter count (3.6B) taken from the model card; the checkpoint config does not state it.",
+        applicability: "partial",
+        limitations: [
+          "Active parameter count (3.6B) is taken from the model card; the checkpoint config does not state it. Weight bytes, parameter count and attention layout are exact."
+        ]
       },
       license: "apache-2.0",
       contextExtensionMethod: "RoPE scaling (yarn)",
@@ -27588,7 +27606,12 @@ var models_default = {
         source: "hf-config",
         sourceUrl: "https://huggingface.co/moonshotai/Kimi-K3",
         retrievedAt: "2026-10-24",
-        notes: "Architecture derived from config.json at revision f831ab66814297da540d832a5235f8e904f29d06. Resident weight bytes (1,560,860,324,864) measured from model.safetensors.index.json total_size. Total parameter count (2,779,931,837,184) from the HuggingFace model API safetensors metadata. Recurrent state size is derived from the checkpoint dtype (bf16). The config does not publish a separate state dtype; the error bound is under 0.03% of the model footprint. Active parameter count (104B) taken from the model card; the checkpoint config does not state it."
+        notes: "Architecture derived from config.json at revision f831ab66814297da540d832a5235f8e904f29d06. Resident weight bytes (1,560,860,324,864) measured from model.safetensors.index.json total_size. Total parameter count (2,779,931,837,184) from the HuggingFace model API safetensors metadata. Recurrent state size is derived from the checkpoint dtype (bf16). The config does not publish a separate state dtype; the error bound is under 0.03% of the model footprint. Active parameter count (104B) taken from the model card; the checkpoint config does not state it.",
+        applicability: "partial",
+        limitations: [
+          "Recurrent state size is derived from the checkpoint dtype (bf16). The config publishes no separate state dtype; the error bound is under 0.03% of the model footprint.",
+          "Active parameter count (104B) is taken from the model card; the checkpoint config does not state it. Weight bytes, parameter count and attention layout are exact."
+        ]
       },
       license: "kimi-k3"
     },
@@ -28428,7 +28451,11 @@ var models_default = {
         source: "hf-config",
         sourceUrl: "https://huggingface.co/Qwen/Qwen3.8-27B",
         retrievedAt: "2026-10-24",
-        notes: "Architecture derived from config.json at revision 1d4bf0f2ff6012fd82039f2fa52739d0dd7c60c0. Resident weight bytes (55,562,855,904) measured from model.safetensors.index.json total_size. Total parameter count (27,781,427,952) from the HuggingFace model API safetensors metadata. Checkpoint carries 1 multi-token-prediction head layer(s). These are a draft head, not part of the per-token decode path, so they are not counted as active parameters."
+        notes: "Architecture derived from config.json at revision 1d4bf0f2ff6012fd82039f2fa52739d0dd7c60c0. Resident weight bytes (55,562,855,904) measured from model.safetensors.index.json total_size. Total parameter count (27,781,427,952) from the HuggingFace model API safetensors metadata. Checkpoint carries 1 multi-token-prediction head layer(s). These are a draft head, not part of the per-token decode path, so they are not counted as active parameters.",
+        applicability: "partial",
+        limitations: [
+          "Checkpoint carries 1 multi-token-prediction head layer (~370M of 27.78B) — a draft head, not part of the per-token decode path, so it is not counted as active parameters. Weight bytes, parameter count and attention layout are exact."
+        ]
       },
       license: "apache-2.0"
     },
@@ -29331,6 +29358,7 @@ var ETA_COMPUTE = 0.5;
 var ETA_NVLINK = 0.85;
 var KERNEL_OVERHEAD_MS = 30;
 var FIRST_ANSWER_TOKENS = 12;
+var FIRST_ANSWER_METRIC_NOTE = "Estimated time to 12 generated tokens, used as a readable-output proxy. " + "This does not identify the semantic start of an answer, and it does not separately " + "account for hidden reasoning tokens unless the selected model profile explicitly supports that behavior.";
 var DEFAULT_BATCHING_MULTIPLIER = 1.5;
 var ANTHROPIC_CACHE_WRITE_5M = 1.25;
 var ANTHROPIC_CACHE_WRITE_1H = 2;
@@ -30175,7 +30203,11 @@ function handleEstimateCapacity(input) {
       ttftMs: { expected: Math.round(result.ttftMs) },
       firstAnswerLatencyMs: Math.round(result.firstAnswerLatencyMs),
       itlMs: { expected: Math.round(result.itlMs) },
-      totalLatencyMs: Math.round(result.totalLatencyMs)
+      totalLatencyMs: Math.round(result.totalLatencyMs),
+      metricNotes: {
+        ttftMs: "Estimated first-token latency: prefill + the first decode step + per-request overhead. " + "An estimate of first-token availability on the serving side — it does not model the " + "client's rendering or network path.",
+        firstAnswerLatencyMs: `Estimated readable-output latency: the time to generate ${FIRST_ANSWER_TOKENS} tokens, ` + "used as a readable-output proxy. It does NOT identify the semantic start of an answer, " + "and it does not separately account for hidden reasoning tokens unless the selected model " + "profile explicitly supports that behavior."
+      }
     },
     memory: {
       modelWeightsGb: +result.modelSizeGb.toFixed(2),
@@ -30447,7 +30479,14 @@ function handleListModels(input) {
       nativeWeightFormat: m.nativeWeightFormat ?? null,
       residentWeightBytes: m.residentWeightBytes ?? null,
       license: m.license ?? null,
-      repository: m.repository ?? null
+      repository: m.repository ?? null,
+      provenance: {
+        source: m.provenance.source,
+        sourceUrl: m.provenance.sourceUrl ?? null,
+        retrievedAt: m.provenance.retrievedAt ?? null,
+        applicability: m.provenance.applicability ?? "exact",
+        limitations: m.provenance.limitations ?? []
+      }
     })),
     catalogVersion: CATALOG_VERSION2
   };

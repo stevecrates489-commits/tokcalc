@@ -34,6 +34,7 @@ import type {
   GpuCategory,
   GpuSpec,
   ModelCategory,
+  ModelRecord,
   ModelSpec,
   Quantization,
   QuantMeta,
@@ -47,6 +48,7 @@ export type {
   GpuCategory,
   GpuSpec,
   ModelCategory,
+  ModelRecord,
   ModelSpec,
   Quantization,
   QuantMeta,
@@ -62,16 +64,40 @@ export const KERNEL_OVERHEAD_MS = 30; // per-request overhead
 /**
  * How many tokens a streamed answer needs before a human can act on it.
  *
- * TTFT reports when the first *character* appears. A user cannot read "#" —
- * they need a clause. We model "readable" as roughly one short clause, and
- * state the assumption rather than hiding it inside a formula.
+ * TTFT reports when the first *token* is available to the client — it does not
+ * model the client's rendering or network path, so it is an estimate of
+ * first-token availability rather than a literal "character appears on
+ * screen". A user cannot read a single token, though — they need a clause.
+ * We model "readable" as roughly one short clause, and state the assumption
+ * rather than hiding it inside a formula.
  */
 export const FIRST_ANSWER_TOKENS = 12;
 
 /**
- * Confidence levels surfaced in the UI to help users trust (or question)
- * specific numbers. The research brief called this "honest uncertainty" —
- * a key credibility signal for technical audiences (HN/Reddit/ML engineers).
+ * What `firstAnswerLatencyMs` actually measures.
+ *
+ * It is the time to generate `FIRST_ANSWER_TOKENS` tokens, used as a proxy for
+ * "when does the user have something readable". It is NOT semantic answer
+ * detection: the model may have emitted a preamble, a restatement of the
+ * question, or a tool-call preamble rather than the answer itself. It also
+ * does not separately account for hidden reasoning tokens (see
+ * `reasoningTokens`) — a reasoning model burns those before any visible
+ * output, and the real first *visible* token arrives later than this estimate.
+ *
+ * The name is kept for API compatibility; the UI labels it "estimated
+ * readable-output latency" so nobody reads it as "the answer has started".
+ */
+export const FIRST_ANSWER_METRIC_NOTE =
+  "Estimated time to 12 generated tokens, used as a readable-output proxy. " +
+  "This does not identify the semantic start of an answer, and it does not separately " +
+  "account for hidden reasoning tokens unless the selected model profile explicitly supports that behavior.";
+
+/**
+ * Provenance of each number surfaced in the UI, so a reader can tell *where*
+ * a figure came from and question it at the source.
+ *
+ * The research brief called this "honest uncertainty" — a key credibility
+ * signal for technical audiences (HN/Reddit/ML engineers).
  *
  * The older four-value scheme lumped three genuinely different kinds of
  * evidence under "measured" (a vendor spec sheet, a published price, and a
@@ -89,6 +115,16 @@ export const FIRST_ANSWER_TOKENS = 12;
  *  - "heuristic"        → derived by a rule of thumb with known error bars
  *                         (e.g. continuous-batching multiplier 1.5×).
  *  - "user_supplied"    → the user typed it in (e.g. GPU $/hr override).
+ *
+ * IMPORTANT: these are source categories, NOT a ranked confidence ladder.
+ * Provenance is not confidence. An `observed_run` can be genuine but
+ * irrelevant to the context length being planned; an `official_spec` can
+ * describe memory capacity precisely while saying nothing about throughput.
+ * How far a given number actually holds is carried separately by the
+ * catalog's `provenance.applicability` and `provenance.limitations`.
+ *
+ * The type keeps its historical name because it is part of the published MCP
+ * wire format; the semantics are provenance.
  */
 export type Confidence =
   | "official_spec"

@@ -42,6 +42,8 @@ import {
   computeKVBytesPerToken,
   computeStateBytes,
   computeKVCacheGb,
+  FIRST_ANSWER_TOKENS,
+  FIRST_ANSWER_METRIC_NOTE,
   type ModelSpec,
 } from "../src/lib/token-calc";
 
@@ -105,6 +107,43 @@ describe("catalog records", () => {
       if (m.attentionLayers) {
         expect(m.architectureStatus).toBeDefined();
         expect(m.attentionLayers.length).toBe(m.layers);
+      }
+    }
+  });
+
+  it("partial or lower-bound applicability always states at least one limitation", () => {
+    // Provenance is source-of-information, not a confidence score. If a record
+    // says "only partly holds" it must say WHICH part — otherwise the reader
+    // cannot tell what to discount.
+    for (const m of MODELS) {
+      const p = m.provenance;
+      if (p.applicability === "partial" || p.applicability === "lower-bound") {
+        expect(p.limitations).toBeDefined();
+        expect(p.limitations!.length).toBeGreaterThan(0);
+        for (const limitation of p.limitations!) {
+          expect(limitation.length).toBeGreaterThan(0);
+        }
+      }
+    }
+  });
+
+  it("a memory-only architecture is reported as a lower bound, not as an exact figure", () => {
+    // The memory number for a partially-modelled architecture UNDERSTATES the
+    // real requirement. If applicability said "exact" the reader would treat a
+    // floor as a measurement.
+    for (const m of MODELS) {
+      if (m.architectureStatus === "memory-only") {
+        expect(m.provenance.applicability).toBe("lower-bound");
+        expect(m.provenance.limitations?.length ?? 0).toBeGreaterThan(0);
+      }
+    }
+  });
+
+  it("applicability is only one of the three declared values", () => {
+    for (const m of MODELS) {
+      const a = m.provenance.applicability;
+      if (a !== undefined) {
+        expect(["exact", "partial", "lower-bound"]).toContain(a);
       }
     }
   });
@@ -337,5 +376,40 @@ describe("calculate() uses the architecture-aware KV", () => {
       outputTokens: 128,
     });
     expect(res.stateBytesGb).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 6. Latency metric semantics
+// ---------------------------------------------------------------------------
+
+describe("latency metrics are described honestly", () => {
+  const res = calculate({
+    modelId: "llama3-8b",
+    gpuId: "h100-sxm",
+    quantization: "fp16",
+    numGpus: 1,
+    batchSize: 1,
+    promptTokens: 4096,
+    outputTokens: 128,
+  });
+
+  it("the first-token estimate is more than prefill alone", () => {
+    // TTFT = prefill + the first decode step + per-request overhead. Reporting
+    // prefill alone was the original bug.
+    expect(res.ttftMs).toBeGreaterThan(res.prefillTimeMs);
+  });
+
+  it("the readable-output estimate is strictly later than the first token", () => {
+    expect(res.firstAnswerLatencyMs).toBeGreaterThan(res.ttftMs);
+  });
+
+  it("the readable-output estimate is documented as a token-count proxy, not answer detection", () => {
+    // The name "firstAnswerLatencyMs" is kept for API compatibility, but the
+    // documented meaning must not imply semantic answer detection.
+    expect(FIRST_ANSWER_TOKENS).toBe(12);
+    expect(FIRST_ANSWER_METRIC_NOTE).toContain("12 generated tokens");
+    expect(FIRST_ANSWER_METRIC_NOTE).toContain("does not identify the semantic start");
+    expect(FIRST_ANSWER_METRIC_NOTE).toContain("hidden reasoning");
   });
 });

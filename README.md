@@ -37,10 +37,15 @@ Not another static "tokens per second" calculator.
 
 **[tokcalc.vercel.app](https://tokcalc.vercel.app)** — no signup, no tracking, no paywall.
 
+tokcalc is an open-source LLM serving capacity planner with **44 models,
+31 accelerators, and 16 quantization formats**. It estimates model fit, KV/state
+memory, throughput, latency, topology, and cost through a shared catalog and
+calculation engine used by the website, the MCP server, and the CLI.
+
 Pick a model, a GPU, and a workload. Get an instant capacity plan:
 
 - Generation speed (tok/s)
-- Time-to-first-token (TTFT) + inter-token latency (ITL)
+- Estimated first-token latency + inter-token latency (ITL)
 - VRAM budget with KV-cache sizing
 - Multi-GPU topology recommendation (Single GPU → TP×2/4/8 → Context Parallel)
 - Monthly cost + break-even vs API pricing
@@ -76,7 +81,7 @@ jobs:
   plan:
     runs-on: ubuntu-latest
     steps:
-      - uses: stevecrates489-commits/tokcalc@v0.3.0
+      - uses: stevecrates489-commits/tokcalc@v0.3.4
         with:
           fail-on-infeasible: true
 ```
@@ -95,7 +100,7 @@ There is no second implementation to drift.
 Any field can be overridden per-run, or you can skip the config file entirely:
 
 ```yaml
-- uses: stevecrates489-commits/tokcalc@v0.3.0
+- uses: stevecrates489-commits/tokcalc@v0.3.4
   with:
     model: mixtral-8x7b
     gpu: h200-sxm
@@ -166,12 +171,13 @@ Independent calculator (separate state) that compares:
 
 ### Reference tab
 
+A tab on the homepage (`tokcalc.vercel.app` → **Reference**), not a separate route.
 6 sub-tables — fully transparent, every record source-linked where available:
-- **Models** (35 entries: Llama 4 Scout/Maverick, Qwen 3 family, DeepSeek V3/R1, Pixtral, BGE-M3, ...)
-- **GPUs** (30 entries: H100/H200/B200/B300, AMD MI300X/MI325X, Intel Gaudi 3, TPU v5p/Trillium, Groq LPU, Cerebras WSE-3, Apple M2/M3/M4 Ultra, ...)
+- **Models** (44 entries: Llama 4 Scout/Maverick, Qwen 3 family, DeepSeek V3/R1, Pixtral, BGE-M3, GPT-OSS 20B/120B, Kimi K3, GLM-5.3, ...)
+- **Accelerators** (31 entries: H100/H200/B200/B300, AMD MI300X/MI325X, Intel Gaudi 3, TPU v5p/Trillium, Groq LPU, Cerebras WSE-3, Apple M2/M3/M4 Ultra, ...)
 - **Quantization** (16 formats: FP16/BF16, GGUF Q2_K→Q8_0, GPTQ, AWQ, EXL2, FP8, NVFP4)
 - **API pricing** (13 models with input/cached/output + retired/current status)
-- **Cloud GPU pricing** (all GPUs with $/hr > 0 + typical providers — static curated)
+- **Cloud GPU pricing** (all accelerators with $/hr > 0 + typical providers — static curated)
 - **🔴 Live pricing** (real-time fetch from Azure + AWS + GCP + Vast.ai in parallel — LIVE badges + timestamps)
 
 ### The long-context capacity planner (the differentiator)
@@ -320,7 +326,7 @@ running at 10% utilization pays 10× more per token than the theoretical minimum
 
 | Capability | induwara / techfuelhq / pcmasterstudio | gigagpu / kickllm / cloudparity | HF Open LLM Leaderboard / MLPerf | **tokcalc** |
 |---|:---:|:---:|:---:|:---:|
-| Model × GPU × quant tok/s | ✓ | some | some | **✓** |
+| Model × accelerator × quant tok/s | ✓ | some | some | **✓** |
 | Model-fit / VRAM | basic | rare | rare | **✓** |
 | KV-cache by context + concurrency | — | — | implicit | **✓** |
 | Prefill vs decode split (TTFT/ITL) | — | — | engine-specific | **✓** |
@@ -342,15 +348,15 @@ running at 10% utilization pays 10× more per token than the theoretical minimum
 ## Roadmap
 
 ### Shipped
-- ✅ 39 models, 31 GPUs, 16 quantization formats
+- ✅ 44 models, 31 accelerators, 16 quantization formats
 - ✅ Continuous batching, reasoning tokens, prompt caching
-- ✅ TTFT/ITL split, long-context superlinear attention
+- ✅ Estimated first-token latency / ITL split, long-context superlinear attention
 - ✅ Long-context capacity planner + topology recommendation
 - ✅ Build-vs-Buy calculator (13 API providers with retired/current status)
 - ✅ Reference catalog (6 sub-tables including live pricing)
 - ✅ **Live GPU pricing** (Azure + AWS + GCP + Vast.ai parallel fetch with LIVE badges)
 - ✅ **Observed benchmark calibration** (paste vLLM/SGLang/TRT-LLM JSON → verdict)
-- ✅ **MCP server v0.2.9** — 11 read-only tools, stdio + Streamable HTTP transports
+- ✅ **MCP server v0.3.4** — 10 read-only tools + 1 calibration writer, stdio + Streamable HTTP transports
 - ✅ **Single-core MCP architecture** — one `src/lib/mcp/core.ts`, shimmed into both the
   hosted endpoint and the npm package, so the two surfaces cannot drift
 - ✅ **Published to the [MCP Registry](https://registry.modelcontextprotocol.io)** and kept
@@ -383,7 +389,7 @@ running at 10% utilization pays 10× more per token than the theoretical minimum
 ### Deliberately not doing
 
 - **~~i18n (Chinese / Japanese / Korean)~~** — permanent translation maintenance across
-  39 models × 30 GPUs × 11 tools, and traffic is currently overwhelmingly CI and agent
+  44 models × 31 accelerators × 11 tools, and traffic is currently overwhelmingly CI and agent
   installs rather than human readers. Revisit only if CJK traffic shows up in analytics.
 - **~~OAuth 2.1 / PKCE~~** — auth infrastructure for a product with one user. Self-serve key
   issuance plus Upstash rate limiting already covers the real need. Revisit on demand.
@@ -407,7 +413,7 @@ cloud/data/team features are paid.
 
 ### Why this structure
 - **Trust**: Open-source formulas build credibility vs opaque competitors
-- **Community**: Contributors can submit models, GPUs, quants, benchmarks
+- **Community**: Contributors can submit models, accelerators, quants, benchmarks
 - **Defensibility**: Trademark + cloud features + URL-share viral loop protect against forks
 - **Revenue**: Cloud tier funds ongoing development + pricing/benchmark data maintenance
 
@@ -416,14 +422,14 @@ cloud/data/team features are paid.
 We welcome contributions! See [CONTRIBUTING.md](CONTRIBUTING.md) for:
 
 - How to add a model (with HuggingFace config.json as source)
-- How to add a GPU (with critical guardrails for B200/B300 null FP16 fields)
+- How to add an accelerator (with critical guardrails for B200/B300 null FP16 fields)
 - How to add a quantization format (with measured file sizes as source)
 - How to submit a benchmark (3-tier confidence model)
 - How to improve a formula (cite the source, no magic numbers)
 
 ### Most-needed contributions
 - 🟢 New models (Qwen 3, Mistral Large 4, Llama 4 variants as they release)
-- 🟢 New GPUs (B300, AMD MI400, Apple M5 Ultra when shipping)
+- 🟢 New accelerators (B300, AMD MI400, Apple M5 Ultra when shipping)
 - 🟢 New quantization formats (mxFP8, MXFP4, BitNet 2)
 - 🟢 Real benchmark data (run vLLM benchmarks and submit with provenance)
 - 🟢 Translations (especially Chinese, Japanese, Korean)
@@ -432,27 +438,36 @@ We welcome contributions! See [CONTRIBUTING.md](CONTRIBUTING.md) for:
 
 tokcalc ships an [MCP (Model Context Protocol)](https://modelcontextprotocol.io) server that lets AI agents (Cursor, Claude Desktop, Cline) call tokcalc during design reviews.
 
-**npm package**: [`@tokcalc/mcp-server`](https://www.npmjs.com/package/@tokcalc/mcp-server) (latest: v0.2.9)
+**npm package**: [`@tokcalc/mcp-server`](https://www.npmjs.com/package/@tokcalc/mcp-server) (latest: v0.3.4)
 **Public endpoint**: `https://tokcalc.vercel.app/api/mcp` (Streamable HTTP, bearer auth, rate-limited)
 **Install docs**: `https://tokcalc.vercel.app/mcp`
 
-### 11 read-only tools
+### 11 tools — 10 read-only + 1 calibration writer
 
-| Tool | What it does |
-|---|---|
-| `estimate_capacity` | VRAM/KV/throughput/latency/cost for one config |
-| `compare_gpus` | Ranked GPU comparison for one workload |
-| `recommend_topology` | TP/CP topology recommendation |
-| `estimate_api_vs_self_host` | Break-even analysis |
-| `list_models` | Discover supported model IDs |
-| `list_gpus` | Discover supported GPU IDs |
-| `get_mlperf_benchmarks` | Curated MLPerf Inference v4.1 audited reference configs |
-| `find_config_for_slo` | **Inverse planner** — SLOs + traffic → feasible configs ranked by cost/throughput/value |
-| `plan_deployment` | **One-call decision brief** — memory + perf + build-vs-buy + risks + next steps |
-| `fetch_model_spec` | Diff the catalog against live HuggingFace config.json (24h cache) |
-| `record_measured` | Store real tok/s measurements; future estimates self-calibrate |
+| Tool | What it does | Access |
+|---|---|---|
+| `estimate_capacity` | VRAM/KV/throughput/latency/cost for one config | read-only |
+| `compare_gpus` | Ranked accelerator comparison for one workload | read-only |
+| `recommend_topology` | TP/CP topology recommendation | read-only |
+| `estimate_api_vs_self_host` | Break-even analysis | read-only |
+| `list_models` | Discover supported model IDs | read-only |
+| `list_gpus` | Discover supported accelerator IDs | read-only |
+| `get_mlperf_benchmarks` | Curated MLPerf Inference v4.1 audited reference configs | read-only |
+| `find_config_for_slo` | **Inverse planner** — SLOs + traffic → feasible configs ranked by cost/throughput/value | read-only |
+| `plan_deployment` | **One-call decision brief** — memory + perf + build-vs-buy + risks + next steps | read-only |
+| `fetch_model_spec` | Diff the catalog against live HuggingFace config.json (24h cache) | read-only |
+| `record_measured` | Store real tok/s measurements; future estimates self-calibrate | **writes state** |
 
-All tools are **read-only** — no side effects, no cloud credentials, no deployments.
+The ten planning tools have no side effects, no cloud credentials, no
+deployments. `record_measured` is the one writer: it stores a measurement so
+later estimates for that model+GPU+quantization can self-calibrate. Every tool
+declares this in the MCP wire annotations (`readOnlyHint` / `destructiveHint` /
+`idempotentHint` / `openWorldHint`), so a client can tell a read from a write
+before calling it.
+
+Tool parameters are strict — unknown keys are rejected rather than ignored, and
+the error names the valid ones. The parameters are `model` and `gpu` (not
+`modelId` / `gpuType`).
 
 ### Option A: Public hosted endpoint (recommended — no install)
 
@@ -504,7 +519,7 @@ Set `MCP_API_KEY`, `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN` env vars
 
 > "I need to serve Llama 3.3 70B at 32K context for 50 concurrent users. What GPU topology do you recommend, and how much will it cost per month?"
 
-The agent calls `list_models` → `list_gpus` → `recommend_topology` → `estimate_capacity` → returns a structured plan with VRAM, throughput, latency, cost, and confidence.
+The agent calls `list_models` → `list_gpus` → `recommend_topology` → `estimate_capacity` → returns a structured plan with VRAM, throughput, latency, cost, and provenance.
 
 ## Development & testing
 
@@ -515,8 +530,15 @@ bunx tsc --noEmit
 # Golden-number suite (33 tests) — hand-verified oracle values
 bun test tests/mcp-golden.test.ts
 
-# Surface-parity suite (9 tests) — every surface advertises the same 11 tools
+# Surface-parity suite (13 tests) — every surface advertises the same 11 tools
 bun test tests/mcp-surface-parity.test.ts
+
+# Catalog suite (29 tests) — schema conformance, id stability, provenance,
+# architecture-engine correctness, backward compatibility
+bun test tests/catalog.test.ts
+
+# Catalog validation (Zod schemas + id/provenance integrity) — CI gate
+bun scripts/catalog-validate.ts
 
 # Build the npm server dist + prepublish guard (freshness + version sync)
 cd mini-services/mcp-server && bun run build && node scripts/prepublish-check.js
@@ -524,10 +546,10 @@ cd mini-services/mcp-server && bun run build && node scripts/prepublish-check.js
 # 35-check black-box stdio QA battery against the freshly built dist
 cd ../.. && node tests/qa-live-probe.mjs local
 # …or against the PUBLISHED npm tarball:
-node tests/qa-live-probe.mjs 0.2.9
+node tests/qa-live-probe.mjs 0.3.4
 
 # 20-check HTTP smoke probe against the hosted /api/mcp surface
-MCP_API_KEY=<key> EXPECTED_VERSION=0.2.9 node tests/http-smoke.mjs http://localhost:3001
+MCP_API_KEY=<key> EXPECTED_VERSION=0.3.4 node tests/http-smoke.mjs http://localhost:3001
 # …or against production:
 MCP_API_KEY=<key> node tests/http-smoke.mjs https://tokcalc.vercel.app
 ```
@@ -578,7 +600,7 @@ tokcalc/
 │   │   │   ├── mcp-store.ts         # per-install store (spec cache + calibration)
 │   │   │   └── auth.ts               # validateApiKey (Redis + env var)
 │   │   ├── token-calc.ts             # Core calculation engine
-│   │   ├── mlperf-curated.ts         # 9 MLPerf v4.1 reference configs
+│   │   ├── mlperf-curated.ts         # 10 MLPerf v4.1 reference configs
 │   │   ├── price-schema.ts           # PriceRecord type + helpers
 │   │   ├── benchmark-schema.ts       # BenchmarkRecord + CalibrationResult
 │   │   ├── engine-presets.ts         # 5 engine presets (vLLM/SGLang/TRT-LLM/llama.cpp/generic)
@@ -595,9 +617,9 @@ tokcalc/
 │       ├── index.ts                  # Stdio entry (tokcalc-mcp-server)
 │       └── package.json              # @tokcalc/mcp-server npm package
 ├── public/
-│   ├── sitemap.xml                   # 5 URLs (/, /mcp, 3 compare pages)
 │   ├── og.png                        # OG image
 │   └── manifest.json                 # PWA manifest
+├── src/app/sitemap.ts                # Generated sitemap (859 URLs — built from the catalog)
 ├── server.json                       # MCP registry entry (packages + remotes)
 ├── package.json                      # Web app deps
 └── next.config.ts

@@ -191,6 +191,36 @@ if (unspecified.length === 0 && unspecifiedAccels.length === 0) {
   console.log("  ok    every record names a provenance source");
 }
 
+// Provenance is source-of-information, not a confidence score. A record that
+// claims "partial" applicability but states no limitation gives the reader no
+// way to know WHICH part is unreliable — so the two must agree.
+for (const rec of [...models, ...accels]) {
+  const p = rec.provenance;
+  if (p.applicability === "partial" && (!p.limitations || p.limitations.length === 0)) {
+    fail(
+      `${rec.id}: provenance.applicability is "partial" but no limitations are stated — ` +
+        `a reader cannot tell which part of the value is unreliable`,
+    );
+  }
+  if (p.applicability === "lower-bound" && (!p.limitations || p.limitations.length === 0)) {
+    fail(
+      `${rec.id}: provenance.applicability is "lower-bound" but no limitations are stated — ` +
+        `the reader needs to know what is being under-counted`,
+    );
+  }
+  // A "memory-only" architecture is exactly a lower-bound claim; make sure the
+  // two markers agree so the caveat cannot be lost in translation.
+  if ("architectureStatus" in rec && rec.architectureStatus === "memory-only") {
+    if (p.applicability !== "lower-bound") {
+      fail(
+        `${rec.id}: architectureStatus is "memory-only" but provenance.applicability is ` +
+          `"${p.applicability ?? "exact"}" — the memory figure is a lower bound and must say so`,
+      );
+    }
+  }
+}
+console.log("  ok    applicability and limitations agree where both are stated");
+
 // Every model that declares an attention layout must be fully described.
 for (const m of models) {
   if (m.attentionLayers && m.attentionLayers.length !== m.layers) {

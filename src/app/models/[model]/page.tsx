@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowRight, Cpu, Gauge, MemoryStick, Zap } from "lucide-react";
+import { ArrowRight, Cpu, Gauge, Info, MemoryStick, Zap } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -560,6 +560,36 @@ export default async function ModelPage({
           </p>
         </CardContent>
       </Card>
+
+      {model.provenance.limitations && model.provenance.limitations.length > 0 && (
+        <Card className="border-border/60 shadow-sm">
+          <CardHeader>
+            <CardTitle className="text-base flex items-center gap-2">
+              <Info className="size-4 text-amber-500" />
+              Limitations of these numbers
+            </CardTitle>
+            <CardDescription className="text-xs">
+              Where the source does not fully establish the values above.
+              {" "}
+              {model.provenance.applicability === "lower-bound"
+                ? "The figures are a lower bound — real usage is at least this."
+                : model.provenance.applicability === "partial"
+                  ? "Some of the figures hold only under conditions that may not apply to you."
+                  : null}
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <ul className="space-y-1.5 text-xs text-muted-foreground">
+              {model.provenance.limitations.map((limitation, i) => (
+                <li key={i} className="flex items-start gap-2">
+                  <span className="text-amber-500 shrink-0 mt-0.5">•</span>
+                  <span className="leading-relaxed">{limitation}</span>
+                </li>
+              ))}
+            </ul>
+          </CardContent>
+        </Card>
+      )}
 
       <ContentFooter />
     </ContentShell>

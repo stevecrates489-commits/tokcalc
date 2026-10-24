@@ -16,6 +16,7 @@
 
 import { z } from "zod";
 import {
+  APPLICABILITIES,
   ARCHITECTURE_STATUSES,
   ATTENTION_KINDS,
   GPU_CATEGORIES,
@@ -44,6 +45,8 @@ export const ProvenanceSchema = z
     sourceUrl: z.string().url().optional(),
     retrievedAt: z.string().regex(ISO_DATE, "expected YYYY-MM-DD").optional(),
     notes: z.string().optional(),
+    applicability: z.enum(APPLICABILITIES).optional(),
+    limitations: z.array(z.string().min(1)).optional(),
   })
   .refine(
     (p) => p.source === "unspecified" || p.sourceUrl !== undefined,
@@ -51,6 +54,10 @@ export const ProvenanceSchema = z
       message:
         "provenance.sourceUrl is required for every source except \"unspecified\" — a record must not claim a source it cannot point at",
     },
+  )
+  .refine(
+    (p) => !p.limitations || p.limitations.length > 0,
+    { message: "provenance.limitations must not be an empty array — omit it instead" },
   );
 
 export const LayerAttentionSchema = z

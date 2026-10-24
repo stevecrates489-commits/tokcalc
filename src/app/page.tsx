@@ -147,16 +147,18 @@ const GLOSSARY = {
   moe: "Mixture-of-Experts: a model with many 'expert' sub-networks, where only a few activate per token. Total size on disk is large, but per-token work is small. Example: Mixtral 8x7B has 47B total but only ~13B active per token.",
   gqa: "Grouped-Query Attention: an optimization that shares the same 'memory scratch space' (KV cache) across multiple attention heads. Cuts VRAM use significantly.",
   continuousBatching: "A serving trick where the GPU keeps generating tokens for active requests while NEW requests join mid-flight. Big speedup (1.5-4x typical) for production traffic. Used by vLLM, TGI, SGLang.",
-  ttft: "Time-to-first-token: how long until the first token appears. Modeled as prefill time (the model reading your prompt) PLUS the first decode step, so it is slightly more than prefill alone — the old 'TTFT = prefill' claim was not quite right. Lower = better UX. For what a user actually perceives, see first-answer latency.",
+  ttft: "Estimated first-token latency: how long until the first token is available. Modeled as prefill time (the model reading your prompt) PLUS the first decode step, so it is slightly more than prefill alone — the old 'TTFT = prefill' claim was not quite right. This is an estimate of first-token availability on the serving side; it does not model your client's rendering or network path. Lower = better UX. For what a user actually perceives, see estimated readable-output latency.",
   verdict: "The Verdict panel answers three questions that are easy to confuse. FIT: does the model and its cache fit in memory at all? RUNTIME: how fast does it actually run? SLO: does it clear the ceilings you set? A configuration can pass FIT and still be useless if it is three times too slow to serve anyone — which is why the three answers are reported separately.",
   slo: "Service-level objective: the ceiling your service has to clear. Usually a maximum time-to-first-token, a minimum throughput, and a maximum cost per million tokens. Set any of them in the calculator and the Verdict panel turns the runtime numbers into a pass or a fail you can act on.",
-  firstAnswer: "First-answer latency: time until the user has a readable answer, not just a first token. It is TTFT plus the time to decode the first sentence. A 200-token answer usually needs a few more tokens before a human can act on it, so this is usually several times TTFT. If you are writing an SLO, this is the number that matters.",
+  firstAnswer: "Estimated readable-output latency: time until the user has something readable, not just a first token. It is the first-token latency plus the time to decode the first clause. Measured as the time to 12 generated tokens — a heuristic readable-output proxy, NOT semantic answer detection: the model may have emitted a preamble or a restatement instead of the answer, and hidden reasoning tokens are not separately accounted for unless the model profile explicitly supports that. A 200-token answer usually needs a few more tokens before a human can act on it, so this is usually several times the first-token latency. If you are writing an SLO, this is the number that matters.",
   itl: "Inter-token-latency: how fast the model writes each token AFTER the first. This is what users perceive as 'streaming speed'.",
   promptCaching: "Reuse the model's work from a repeated prompt prefix (system prompt, RAG docs, tool schemas). On cache hit, you skip the prefill computation for that prefix. Anthropic: 90% off cached tokens. OpenAI: 50% off.",
   reasoningTokens: "Hidden tokens the model generates internally before answering (e.g. OpenAI o1, DeepSeek R1, Claude thinking). Billed as output but invisible to the user. Important for cost estimates of reasoning models.",
   gguf: "A file format used by llama.cpp for local inference. Has many sub-variants (Q2_K through Q8_0) trading size for quality. Q4_K_M is the recommended sweet spot for local Llama/Mistral.",
   fp8: "8-bit floating-point format. Native on NVIDIA H100/H200 — actually FASTER than FP16 thanks to dedicated FP8 tensor cores. Same VRAM as INT8 but better quality.",
   nvfp4: "NVIDIA's 4-bit floating-point format with block scaling. Native on Blackwell (B200/B300). Roughly 2x faster than FP8 on Blackwell per cited benchmarks.",
+  provenance: "Where a number came from — the spec sheet, the published price, an observed run, a formula, a rule of thumb, or your own input. Provenance is NOT a confidence ranking: an observed run can be perfectly genuine but irrelevant to the context length you are planning, and an official spec can pin memory capacity precisely while saying nothing about throughput. How far a number actually holds is stated separately, per record, as applicability and limitations.",
+  applicability: "How far the source behind a number actually establishes it: 'exact' (the source directly and completely establishes the value), 'partial' (it establishes it only under conditions that may not apply to you), or 'lower-bound' (the figure is a floor — real usage is at least this).",
 } as const;
 
 type GlossaryKey = keyof typeof GLOSSARY;
@@ -449,7 +451,7 @@ export default function Home() {
   const sloChecks: { label: string; ok: boolean; detail: string }[] = [];
   if (sloMaxTtftMs !== "") {
     sloChecks.push({
-      label: "TTFT",
+      label: "First-token latency",
       ok: result.ttftMs <= sloMaxTtftMs,
       detail: `${fmtMs(result.ttftMs)} vs ${fmtMs(sloMaxTtftMs)} ceiling`,
     });
@@ -495,7 +497,7 @@ export default function Home() {
         ? "pass"
         : "fail") as "pass" | "fail" | "unknown",
     value: `${fmtTokens(result.aggregateTokensPerSec)} tok/s aggregate`,
-    detail: `${fmtTokens(result.decodeTokensPerSec)} tok/s per user · first answer ${fmtMs(result.firstAnswerLatencyMs)} · TTFT ${fmtMs(result.ttftMs)}`,
+    detail: `${fmtTokens(result.decodeTokensPerSec)} tok/s per user · readable output ${fmtMs(result.firstAnswerLatencyMs)} · first token ${fmtMs(result.ttftMs)}`,
   };
 
   const handleCopyMarkdown = async () => {
@@ -507,7 +509,8 @@ export default function Home() {
       `## Performance`,
       `- **Decode throughput:** ${fmtTokens(result.decodeTokensPerSec)} tok/s`,
       `- **Aggregate (batched):** ${fmtTokens(result.aggregateTokensPerSec)} tok/s`,
-      `- **TTFT:** ${fmtMs(result.ttftMs)}`,
+      `- **Estimated first-token latency:** ${fmtMs(result.ttftMs)}`,
+      `- **Estimated readable-output latency (${FIRST_ANSWER_TOKENS}-token proxy):** ${fmtMs(result.firstAnswerLatencyMs)}`,
       `- **ITL:** ${fmtMs(result.itlMs)}`,
       `- **Total latency:** ${fmtMs(result.totalLatencyMs)} (${outputTokens}-tok answer)`,
       ``,
@@ -658,7 +661,7 @@ export default function Home() {
               </div>
               <ul className="text-xs text-muted-foreground space-y-1.5 leading-relaxed">
                 <li>→ Can I serve <strong className="text-foreground">Qwen 2.5 72B</strong> at 128K context on 2× H100 with 20 concurrent users?</li>
-                <li>→ How many <strong className="text-foreground">H200s</strong> for 1,000 req/min with P95 TTFT &lt; 2s?</li>
+                <li>→ How many <strong className="text-foreground">H200s</strong> for 1,000 req/min with P95 first-token latency &lt; 2s?</li>
                 <li>→ Does <strong className="text-foreground">FP8 or AWQ</strong> save more money once quality + KV cache + engine support are included?</li>
                 <li>→ At what daily volume does an H100 beat <strong className="text-foreground">GPT-4o</strong> pricing?</li>
               </ul>
@@ -953,7 +956,7 @@ export default function Home() {
                     </p>
                     <div className="grid grid-cols-3 gap-2">
                       <div>
-                        <Label className="text-[10px] text-muted-foreground">Max TTFT (ms)</Label>
+                        <Label className="text-[10px] text-muted-foreground">Max first-token latency (ms)</Label>
                         <Input
                           type="number"
                           placeholder="e.g. 800"
@@ -1230,7 +1233,7 @@ export default function Home() {
                 />
                 <HeadlineCard
                   icon={<Clock className="size-4" />}
-                  label="Time to first token"
+                  label="Est. first-token latency"
                   value={fmtMs(result.ttftMs)}
                   sub={`+ ${fmtMs(result.itlMs)} per token`}
                   glossaryKey="ttft"
@@ -1406,9 +1409,9 @@ export default function Home() {
                     confidence={result.confidence.prefillTokensPerSec}
                   />
                   <Metric
-                    label="First answer (readable)"
+                    label="Est. readable output"
                     value={fmtMs(result.firstAnswerLatencyMs)}
-                    hint={`TTFT + ${FIRST_ANSWER_TOKENS}-token first clause`}
+                    hint={`Time to ${FIRST_ANSWER_TOKENS} generated tokens — heuristic proxy, not semantic answer detection`}
                     glossaryKey="firstAnswer"
                     confidence={result.confidence.firstAnswerLatencyMs}
                   />

@@ -38,6 +38,27 @@ export type ProvenanceSource = (typeof PROVENANCE_SOURCES)[number];
 export const LIFECYCLES = ["active", "deprecated", "experimental", "planned"] as const;
 export type Lifecycle = (typeof LIFECYCLES)[number];
 
+/**
+ * How far a record's values can be relied on for a given question.
+ *
+ * This is deliberately SEPARATE from `ProvenanceSource`. Provenance answers
+ * "where did this number come from?"; applicability answers "does that source
+ * actually establish this particular claim?".
+ *
+ * The distinction matters because a source being authoritative for one
+ * dimension says nothing about another: a vendor spec sheet may state memory
+ * capacity precisely while saying nothing about serving throughput, and a real
+ * observed run may be perfectly genuine while being irrelevant to the context
+ * length you are planning for.
+ *
+ *  - "exact"    → the source directly and completely establishes the value.
+ *  - "partial"  → the source establishes part of it, or only under conditions
+ *                 that do not necessarily hold here (see `limitations`).
+ *  - "lower-bound" → the modelled value is a floor: real usage is at least this.
+ */
+export const APPLICABILITIES = ["exact", "partial", "lower-bound"] as const;
+export type Applicability = (typeof APPLICABILITIES)[number];
+
 export interface Provenance {
   /** Which kind of source the values came from. */
   source: ProvenanceSource;
@@ -47,6 +68,21 @@ export interface Provenance {
   retrievedAt?: string;
   /** Free-form note: caveats, disagreements, what is still unverified. */
   notes?: string;
+  /**
+   * How far the source establishes the values, per dimension. Defaults to
+   * "exact" when not stated — the common case is a source that simply does
+   * establish the number.
+   */
+  applicability?: Applicability;
+  /**
+   * Specific conditions under which the values do not hold as stated.
+   *
+   * Free-form strings, because the reasons are genuinely heterogeneous
+   * ("DSA index cache not modelled", "measured at a different token
+   * distribution"). The point is that a reader can see the caveat without
+   * having to infer it.
+   */
+  limitations?: string[];
 }
 
 // ---------------------------------------------------------------------------

@@ -31,6 +31,7 @@ import {
   QUANTIZATIONS,
   type CalcResult,
   type GpuSpec,
+  type ModelRecord,
   type ModelSpec,
   type Quantization,
   type QuantMeta,
@@ -109,7 +110,12 @@ export interface GpuFit {
 }
 
 export interface ModelContent {
-  model: ModelSpec;
+  /**
+   * The full catalog record, not just the flattened spec — content pages need
+   * the provenance block (source, applicability, limitations) to say how far
+   * the numbers hold.
+   */
+  model: ModelRecord;
   defaultQuant: Quantization;
   quantRows: QuantRow[];
   /** Every catalog GPU, ranked: fitting first, then by value (tokens per $). */

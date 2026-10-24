@@ -3,6 +3,20 @@
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { Confidence } from "@/lib/token-calc";
 
+/**
+ * Provenance badges — where a number came from.
+ *
+ * These are NOT a ranked confidence ladder. The six categories describe the
+ * SOURCE of a value, and none of them is "more trustworthy" than another in
+ * general: an observed run can be perfectly genuine but irrelevant to the
+ * context length you are planning for, and an official spec can state memory
+ * capacity precisely while saying nothing about serving throughput.
+ *
+ * The order of the object below is presentational (roughly spec → price →
+ * measurement → model → rule of thumb → you), not a quality ranking. What
+ * tells you how far to trust a given number is the `applicability` and
+ * `limitations` that sit next to it in the catalog, not its position here.
+ */
 const CONFIDENCE_CONFIG: Record<
   Confidence,
   { color: string; label: string; description: string }
@@ -23,7 +37,7 @@ const CONFIDENCE_CONFIG: Record<
     color: "bg-violet-500",
     label: "Observed run",
     description:
-      "An actual measurement: a benchmark run, or a reading you recorded through record_measured. Real data beats any model of it.",
+      "An actual measurement: a benchmark run, or a reading you recorded through record_measured. Genuine data beats any model of it — but check whether it was measured under conditions that match yours.",
   },
   modeled: {
     color: "bg-emerald-400",
@@ -57,7 +71,7 @@ export function ConfidenceBadge({
       <TooltipTrigger asChild>
         <button
           type="button"
-          aria-label={`Confidence: ${config.label}`}
+          aria-label={`Provenance: ${config.label}`}
           className={`inline-flex items-center gap-1 text-[9px] font-medium uppercase tracking-wider text-muted-foreground hover:text-foreground transition-colors ${className ?? ""}`}
         >
           <span className={`size-1.5 rounded-full ${config.color}`} />
@@ -86,7 +100,7 @@ export function ConfidenceDot({
       <TooltipTrigger asChild>
         <button
           type="button"
-          aria-label={`Confidence: ${config.label}`}
+          aria-label={`Provenance: ${config.label}`}
           className={`inline-flex items-center justify-center ${className ?? ""}`}
         >
           <span className={`size-1.5 rounded-full ${config.color} hover:scale-125 transition-transform`} />
@@ -104,9 +118,14 @@ export function ConfidenceDot({
 export function ConfidenceLegend() {
   return (
     <div className="rounded-md border border-border/60 bg-muted/20 p-3">
-      <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold mb-2">
-        Confidence levels
+      <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold mb-1">
+        Where these numbers come from
       </div>
+      <p className="text-[11px] text-muted-foreground leading-relaxed mb-2">
+        These categories describe the <em>source</em> of a value, not a ranked confidence
+        ladder — none is universally more trustworthy than another. How far a given number
+        holds is stated separately, per record, as applicability and limitations.
+      </p>
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-[11px]">
         {(Object.keys(CONFIDENCE_CONFIG) as Confidence[]).map((key) => {
           const config = CONFIDENCE_CONFIG[key];

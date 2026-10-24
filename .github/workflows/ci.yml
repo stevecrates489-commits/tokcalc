@@ -10,6 +10,10 @@ name: CI
 #
 # The golden suite is the contract: if a number changes, the change must be
 # justified and tests/mcp-golden.test.ts updated deliberately, not silently.
+#
+# The catalog + README gates are the other half of that contract: the catalog
+# is the source of truth, and the README's quoted counts are checked against it
+# so documentation cannot drift away from the data silently.
 
 on:
   push:
@@ -44,6 +48,9 @@ jobs:
 
       - name: Catalog validation (Zod schemas + id/provenance integrity)
         run: bun scripts/catalog-validate.ts
+
+      - name: README count drift (quoted counts vs source of truth)
+        run: bun scripts/readme-counts-check.ts
 
       - name: Build MCP server dist
         working-directory: mini-services/mcp-server

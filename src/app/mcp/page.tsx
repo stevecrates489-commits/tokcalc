@@ -134,7 +134,7 @@ PORT=8080 tokcalc-mcp-http`;
             <Badge className="bg-emerald-500/10 text-emerald-600 border-emerald-500/30 text-[10px]">v{MCP_SERVER_VERSION}</Badge>
           </div>
           <p className="text-muted-foreground text-sm sm:text-base leading-relaxed">
-            11 read-only planning tools for AI agents (Cursor, Claude Desktop, Cline). Ask your AI:
+            11 planning tools for AI agents (Cursor, Claude Desktop, Cline). Ask your AI:
             &quot;How many H100s do I need for Llama 70B at 32K context?&quot; — get a transparent,
             formula-based answer with confidence intervals.
           </p>
@@ -145,10 +145,13 @@ PORT=8080 tokcalc-mcp-http`;
           <CardHeader>
             <CardTitle className="text-base flex items-center gap-2">
               <Box className="size-4 text-emerald-500" />
-              What you get — 11 read-only tools
+              What you get — 11 tools
             </CardTitle>
             <CardDescription className="text-xs">
-              All tools are read-only (no side effects, no mutations). Safe for production agent use.
+              10 read-only planning tools, plus one calibration writer
+              (<code className="font-mono">record_measured</code>) that stores a real measurement so
+              future estimates self-calibrate. Every tool declares its access level in the
+              Access column below, and in the MCP behaviour hints on the wire.
             </CardDescription>
           </CardHeader>
           <CardContent className="p-0">
@@ -492,8 +495,8 @@ PORT=8080 tokcalc-mcp-http`;
               applicationCategory: "DeveloperApplication",
               operatingSystem: "Cross-platform (Node.js 18+)",
               offers: { "@type": "Offer", price: "0", priceCurrency: "USD" },
-              description: "Open-source MCP server for AI agents with 11 read-only LLM capacity planning tools. Supports stdio + HTTP + hosted endpoint at tokcalc.vercel.app/api/mcp.",
-              version: "0.2.7",
+              description: "Open-source MCP server for AI agents with 11 LLM capacity planning tools (10 read-only + 1 calibration writer). Supports stdio + HTTP + hosted endpoint at tokcalc.vercel.app/api/mcp.",
+              version: MCP_SERVER_VERSION,
               license: "https://www.apache.org/licenses/LICENSE-2.0",
               url: "https://tokcalc.vercel.app/mcp",
               downloadUrl: "https://www.npmjs.com/package/@tokcalc/mcp-server",

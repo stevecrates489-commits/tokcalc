@@ -58,6 +58,7 @@ import {
   writeCalibrationRecord,
   latestCalibrationFor,
 } from "../mcp-store";
+import { FIRST_ANSWER_TOKENS } from "../token-calc";
 
 // ============================================================
 // VERSIONS + PROVENANCE
@@ -372,6 +373,18 @@ function handleEstimateCapacity(input: z.infer<typeof EstimateCapacitySchema>) {
       firstAnswerLatencyMs: Math.round(result.firstAnswerLatencyMs),
       itlMs: { expected: Math.round(result.itlMs) },
       totalLatencyMs: Math.round(result.totalLatencyMs),
+      // What these two numbers mean, so a caller does not over-read them.
+      metricNotes: {
+        ttftMs:
+          "Estimated first-token latency: prefill + the first decode step + per-request overhead. " +
+          "An estimate of first-token availability on the serving side — it does not model the " +
+          "client's rendering or network path.",
+        firstAnswerLatencyMs:
+          `Estimated readable-output latency: the time to generate ${FIRST_ANSWER_TOKENS} tokens, ` +
+          "used as a readable-output proxy. It does NOT identify the semantic start of an answer, " +
+          "and it does not separately account for hidden reasoning tokens unless the selected model " +
+          "profile explicitly supports that behavior.",
+      },
     },
     memory: {
       modelWeightsGb: +result.modelSizeGb.toFixed(2),
@@ -733,6 +746,19 @@ function handleListModels(input: z.infer<typeof ListModelsSchema>) {
       residentWeightBytes: m.residentWeightBytes ?? null,
       license: m.license ?? null,
       repository: m.repository ?? null,
+      // Provenance: where the values came from, and how far they hold.
+      // `source` says what kind of source it was; `applicability` says whether
+      // that source actually establishes these numbers for a given question.
+      // An observed_run can be genuine but irrelevant to your context length;
+      // an official_spec can pin memory capacity while saying nothing about
+      // throughput. They are separate axes, not a single confidence score.
+      provenance: {
+        source: m.provenance.source,
+        sourceUrl: m.provenance.sourceUrl ?? null,
+        retrievedAt: m.provenance.retrievedAt ?? null,
+        applicability: m.provenance.applicability ?? "exact",
+        limitations: m.provenance.limitations ?? [],
+      },
     })),
     catalogVersion: CATALOG_VERSION,
   };

@@ -5,6 +5,41 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- **Latency metrics are now labelled for what they actually measure.** The
+  first-token figure is presented as *estimated first-token latency* — an
+  estimate of first-token availability on the serving side, which does not
+  model the client's rendering or network path. The second figure is presented
+  as *estimated readable-output latency* and is explicitly the time to 12
+  generated tokens used as a readable-output proxy: it does not identify the
+  semantic start of an answer, and it does not separately account for hidden
+  reasoning tokens unless the model profile explicitly supports that. The
+  `firstAnswerLatencyMs` field name is kept for API compatibility.
+- **Provenance is no longer presented as a ranked confidence ladder.** The six
+  source categories describe *where* a number came from, not how much to trust
+  it: an observed run can be genuine but irrelevant to your context length, and
+  an official spec can pin memory capacity while saying nothing about
+  throughput. The badge legend now says so, and each catalog record states its
+  own `applicability` (`exact` / `partial` / `lower-bound`) and `limitations`.
+  Model pages render a "Limitations of these numbers" block for any record
+  that has them, and `list_models` returns the same fields to MCP clients.
+- README counts, terminology, navigation links and CLI/MCP parameter names are
+  corrected, and the tool table now states which tool writes state.
+
+### Added
+
+- **README count-drift gate** (`scripts/readme-counts-check.ts`) — recomputes
+  every count the README quotes from the catalog JSON and the test files, and
+  fails CI if the README disagrees. Documentation can no longer drift away
+  from the source of truth silently.
+
+### Fixed
+
+- The `/mcp` page claimed "11 read-only tools" and "All tools are read-only"
+  while its own access column correctly showed `record_measured` as a writer.
+- The MCP `SoftwareApplication` structured data hard-coded `version: "0.2.7"`.
+
 ## [0.3.4] — 2026-10-24
 
 ### Changed
