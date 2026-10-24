@@ -5,6 +5,20 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.3.4] — 2026-10-24
+
+### Changed
+
+- The MCP surface now ships the architecture-aware catalog: `list_models` returns
+  each model's attention kinds, architecture status, native weight format,
+  resident checkpoint bytes, licence and upstream repository, and
+  `estimate_capacity` reports first-answer latency and recurrent-state memory
+  separately from the KV cache. Every tool declares MCP behaviour hints
+  (`readOnlyHint` / `destructiveHint` / `idempotentHint` / `openWorldHint`), with
+  `record_measured` correctly marked as the one writer.
+- Catalog version 0.4.0 — 44 models (5 new families ingested from real
+  checkpoints), 31 accelerators, 16 quantization formats.
+
 ### Added
 
 - **Catalog module** (`catalog/` + `src/catalog/`) — the model, accelerator and
