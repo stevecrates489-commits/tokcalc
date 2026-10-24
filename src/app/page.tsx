@@ -1775,6 +1775,12 @@ export default function Home() {
                 <Sparkles className="size-3" />
                 MCP server
               </Link>
+              <Link href="/models" className="inline-flex items-center text-xs px-2.5 py-1.5 rounded-md border border-border/60 text-muted-foreground hover:text-foreground hover:border-emerald-500/40 hover:bg-muted/60 transition-colors">
+                All models
+              </Link>
+              <Link href="/gpus" className="inline-flex items-center text-xs px-2.5 py-1.5 rounded-md border border-border/60 text-muted-foreground hover:text-foreground hover:border-emerald-500/40 hover:bg-muted/60 transition-colors">
+                All GPUs
+              </Link>
               <Link href="/compare/h100-vs-h200" className="inline-flex items-center text-xs px-2.5 py-1.5 rounded-md border border-border/60 text-muted-foreground hover:text-foreground hover:border-emerald-500/40 hover:bg-muted/60 transition-colors">
                 H100 vs H200
               </Link>

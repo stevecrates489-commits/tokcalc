@@ -3,6 +3,43 @@
 All notable changes to tokcalc (website + `@tokcalc/mcp-server`) are documented here.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Added
+
+- **Programmatic content engine** — `src/lib/content/` derives every published
+  number from `src/lib/token-calc.ts`, the same module the calculator, MCP
+  server, and CLI use. No spec on these pages is hand-typed, so a catalog
+  change (a new price, a corrected VRAM figure) propagates automatically
+  instead of leaving stale prose behind.
+- **`/models/[model]`** — 39 per-model pages: VRAM requirement by
+  quantization, which GPUs fit and how many are needed, throughput and cost
+  per million tokens, concurrency vs context length, architecture facts, and
+  a FAQ rendered as `FAQPage` JSON-LD.
+- **`/models/[model]/on/[gpu]`** — 710 model-on-GPU pages answering the
+  highest-intent query ("can I run Llama 3.3 70B on an H100?"), with a
+  1×/2×/4×/8× tensor-parallel ladder, a context-length table, and cheaper or
+  faster alternatives.
+- **`/gpus/[gpu]`** — 31 per-accelerator pages: hardware specs, the models
+  that fit on one card, and a cross-accelerator comparison on a fixed
+  reference workload.
+- **`/models` and `/gpus`** — hub pages listing the whole catalog.
+- **Dynamic sitemap** (`src/app/sitemap.ts`) generated from the catalog,
+  replacing the hand-maintained `public/sitemap.xml` that listed 4 URLs while
+  the site served dozens. A model or GPU added to the catalog is now
+  discoverable on the next build with no manual XML editing.
+
+### Fixed
+
+- Hardware with no published rental price (`usdPerHour: null` — Groq,
+  Cerebras) and purchased hardware (`usdPerHour: 0` — Apple Silicon) no
+  longer ranks as "the cheapest configuration", because the cost model
+  resolves both to $0/hr. They are excluded from every price ranking and
+  labelled "quote required" instead.
+- Wafer-scale systems and LPUs are no longer reported as "fits on one card" —
+  the whole system is the unit of deployment, so a per-card fit is a category
+  error.
+
 ## [0.3.0] — 2026-09
 
 ### Added
