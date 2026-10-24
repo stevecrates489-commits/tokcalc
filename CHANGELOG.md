@@ -41,6 +41,14 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **First-answer latency** — a separate metric from TTFT. TTFT says when the
   first character appears; first-answer latency says when the user has
   something readable, which is usually several times longer.
+- **Verdict panel** — the calculator now answers three separate questions
+  instead of one "is it feasible" flag: **Fit** (does it load in memory at
+  all, and with how much headroom), **Runtime** (what it actually does), and
+  **SLO** (does it clear the ceilings you set). Set a max TTFT, a minimum
+  throughput or a cost ceiling and the SLO line becomes a pass or a fail you
+  can act on. A configuration can fit comfortably and still be three times
+  too slow to serve anyone — collapsing those into one verdict is how that
+  gets missed. SLO targets are shareable through the URL.
 
 ### Fixed
 

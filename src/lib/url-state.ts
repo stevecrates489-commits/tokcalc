@@ -36,6 +36,10 @@ export interface CalcTabState {
   cacheTTL: string;
   cacheProvider: string;
   engineId?: string;
+  /** SLO ceilings — empty string means "no target set". */
+  sloMaxTtftMs: number | "";
+  sloMinTokensPerSec: number | "";
+  sloMaxCostPerMillion: number | "";
 }
 
 /** Build-vs-Buy tab state — shape mirrors BuildVsBuyTab useState vars */
@@ -93,6 +97,9 @@ export function parseUrlHash(hash: string): {
         cacheTTL: params.get("ct") ?? undefined,
         cacheProvider: params.get("cpr") ?? undefined,
         engineId: params.get("e") ?? undefined,
+        sloMaxTtftMs: numOrUndefOrEmpty(params.get("slt")),
+        sloMinTokensPerSec: numOrUndefOrEmpty(params.get("slm")),
+        sloMaxCostPerMillion: numOrUndefOrEmpty(params.get("slc")),
       } as Partial<CalcTabState>,
     };
   }
@@ -142,6 +149,9 @@ export function serializeCalcState(s: CalcTabState): string {
     if (s.cacheProvider !== "self-hosted") p.set("cpr", s.cacheProvider);
   }
   if (s.engineId && s.engineId !== "generic") p.set("e", s.engineId);
+  if (s.sloMaxTtftMs !== "") p.set("slt", String(s.sloMaxTtftMs));
+  if (s.sloMinTokensPerSec !== "") p.set("slm", String(s.sloMinTokensPerSec));
+  if (s.sloMaxCostPerMillion !== "") p.set("slc", String(s.sloMaxCostPerMillion));
   return p.toString();
 }
 

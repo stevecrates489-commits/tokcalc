@@ -148,6 +148,8 @@ const GLOSSARY = {
   gqa: "Grouped-Query Attention: an optimization that shares the same 'memory scratch space' (KV cache) across multiple attention heads. Cuts VRAM use significantly.",
   continuousBatching: "A serving trick where the GPU keeps generating tokens for active requests while NEW requests join mid-flight. Big speedup (1.5-4x typical) for production traffic. Used by vLLM, TGI, SGLang.",
   ttft: "Time-to-first-token: how long until the first token appears. Modeled as prefill time (the model reading your prompt) PLUS the first decode step, so it is slightly more than prefill alone — the old 'TTFT = prefill' claim was not quite right. Lower = better UX. For what a user actually perceives, see first-answer latency.",
+  verdict: "The Verdict panel answers three questions that are easy to confuse. FIT: does the model and its cache fit in memory at all? RUNTIME: how fast does it actually run? SLO: does it clear the ceilings you set? A configuration can pass FIT and still be useless if it is three times too slow to serve anyone — which is why the three answers are reported separately.",
+  slo: "Service-level objective: the ceiling your service has to clear. Usually a maximum time-to-first-token, a minimum throughput, and a maximum cost per million tokens. Set any of them in the calculator and the Verdict panel turns the runtime numbers into a pass or a fail you can act on.",
   firstAnswer: "First-answer latency: time until the user has a readable answer, not just a first token. It is TTFT plus the time to decode the first sentence. A 200-token answer usually needs a few more tokens before a human can act on it, so this is usually several times TTFT. If you are writing an SLO, this is the number that matters.",
   itl: "Inter-token-latency: how fast the model writes each token AFTER the first. This is what users perceive as 'streaming speed'.",
   promptCaching: "Reuse the model's work from a repeated prompt prefix (system prompt, RAG docs, tool schemas). On cache hit, you skip the prefill computation for that prefix. Anthropic: 90% off cached tokens. OpenAI: 50% off.",
@@ -184,6 +186,14 @@ export default function Home() {
   const [cacheHitRate, setCacheHitRate] = useState(0);
   const [cacheTTL, setCacheTTL] = useState<CacheTTL>("5m");
   const [cacheProvider, setCacheProvider] = useState<"self-hosted" | "anthropic" | "openai">("self-hosted");
+
+  // === SLO targets ===
+  // "Does it fit?" and "is it fast enough?" are different questions, and
+  // "does it meet our SLO?" is a third. These ceilings are what turn the
+  // runtime numbers into a verdict instead of a dashboard.
+  const [sloMaxTtftMs, setSloMaxTtftMs] = useState<number | "">("");
+  const [sloMinTokensPerSec, setSloMinTokensPerSec] = useState<number | "">("");
+  const [sloMaxCostPerMillion, setSloMaxCostPerMillion] = useState<number | "">("");
 
   // === URL-share state (Phase A) ===
   const [urlRestored, setUrlRestored] = useState(false);
@@ -249,6 +259,9 @@ export default function Home() {
       if (typeof c.cacheHitRate === "number") setCacheHitRate(c.cacheHitRate);
       if (c.cacheTTL) setCacheTTL(c.cacheTTL as CacheTTL);
       if (c.cacheProvider) setCacheProvider(c.cacheProvider as "self-hosted" | "anthropic" | "openai");
+      if (c.sloMaxTtftMs !== undefined) setSloMaxTtftMs(c.sloMaxTtftMs);
+      if (c.sloMinTokensPerSec !== undefined) setSloMinTokensPerSec(c.sloMinTokensPerSec);
+      if (c.sloMaxCostPerMillion !== undefined) setSloMaxCostPerMillion(c.sloMaxCostPerMillion);
     }
     setUrlRestored(true);
     /* eslint-enable react-hooks/set-state-in-effect */
@@ -262,6 +275,7 @@ export default function Home() {
       useSpeculative, speculativeBoost,
       useContinuousBatching, continuousBatchingMultiplier,
       reasoningTokens, cachePrefixTokens, cacheHitRate, cacheTTL, cacheProvider,
+      sloMaxTtftMs, sloMinTokensPerSec, sloMaxCostPerMillion,
     };
     if (activeTab === "calculator") {
       writeUrlHash(serializeCalcState(state));
@@ -272,7 +286,7 @@ export default function Home() {
     modelId, gpuId, quantization, numGpus, batchSize, promptTokens, outputTokens,
     gpuHourlyCost, useSpeculative, speculativeBoost, useContinuousBatching,
     continuousBatchingMultiplier, reasoningTokens, cachePrefixTokens, cacheHitRate,
-    cacheTTL, cacheProvider,
+    cacheTTL, cacheProvider, sloMaxTtftMs, sloMinTokensPerSec, sloMaxCostPerMillion,
   ]);
 
   const handleShare = async () => {
@@ -285,6 +299,7 @@ export default function Home() {
         useSpeculative, speculativeBoost,
         useContinuousBatching, continuousBatchingMultiplier,
         reasoningTokens, cachePrefixTokens, cacheHitRate, cacheTTL, cacheProvider,
+        sloMaxTtftMs, sloMinTokensPerSec, sloMaxCostPerMillion,
       };
       writeUrlHash(serializeCalcState(state));
     }
@@ -406,6 +421,82 @@ export default function Home() {
   const selectedGpu = GPUS.find((g) => g.id === gpuId)!;
   const selectedModel = MODELS.find((m) => m.id === modelId)!;
   const selectedQuant = QUANTIZATIONS.find((q) => q.id === quantization)!;
+
+  // ---- Verdict ----
+  // "Does it fit in memory?", "how fast is it?" and "does it clear our SLO?"
+  // are three different questions with three different answers. Collapsing
+  // them into one "feasible" flag is how a configuration that runs but is
+  // 3x too slow to serve anyone gets called a solution.
+  const totalVramGb = selectedGpu.vramGb * numGpus;
+  const usedPct = (result.totalVramNeededGb / totalVramGb) * 100;
+  const gpusNeeded = Math.max(
+    numGpus + 1,
+    Math.ceil(result.totalVramNeededGb / selectedGpu.vramGb),
+  );
+
+  const fitVerdict = result.vramFits
+    ? {
+        state: "pass" as const,
+        value: "Fits",
+        detail: `${fmtBytes(result.totalVramNeededGb)} of ${totalVramGb.toFixed(0)} GB used (${usedPct.toFixed(0)}% of ${numGpus}× ${selectedGpu.name})`,
+      }
+    : {
+        state: "fail" as const,
+        value: "Doesn't fit",
+        detail: `Needs ${fmtBytes(result.totalVramNeededGb)} but has ${totalVramGb.toFixed(0)} GB — about ${gpusNeeded}× ${selectedGpu.name} at ${selectedQuant.label}`,
+      };
+
+  const sloChecks: { label: string; ok: boolean; detail: string }[] = [];
+  if (sloMaxTtftMs !== "") {
+    sloChecks.push({
+      label: "TTFT",
+      ok: result.ttftMs <= sloMaxTtftMs,
+      detail: `${fmtMs(result.ttftMs)} vs ${fmtMs(sloMaxTtftMs)} ceiling`,
+    });
+  }
+  if (sloMinTokensPerSec !== "") {
+    sloChecks.push({
+      label: "Throughput",
+      ok: result.aggregateTokensPerSec >= sloMinTokensPerSec,
+      detail: `${fmtTokens(result.aggregateTokensPerSec)} vs ${fmtTokens(sloMinTokensPerSec)} tok/s floor`,
+    });
+  }
+  if (sloMaxCostPerMillion !== "") {
+    sloChecks.push({
+      label: "Cost",
+      ok: result.costPerMillionOutputTokens <= sloMaxCostPerMillion,
+      detail: `${fmtMoney(result.costPerMillionOutputTokens)} vs ${fmtMoney(sloMaxCostPerMillion)} per 1M tokens`,
+    });
+  }
+  const failedChecks = sloChecks.filter((c) => !c.ok);
+
+  const sloVerdict = {
+    state: (sloChecks.length === 0
+      ? "unknown"
+      : failedChecks.length === 0
+        ? "pass"
+        : "fail") as "pass" | "fail" | "unknown",
+    value:
+      sloChecks.length === 0
+        ? "No target set"
+        : failedChecks.length === 0
+          ? "Meets every target"
+          : `Misses ${failedChecks.length} of ${sloChecks.length}`,
+    detail:
+      sloChecks.length === 0
+        ? "Set an SLO target in the inputs and this becomes a pass or a fail."
+        : sloChecks.map((c) => `${c.ok ? "✓" : "✗"} ${c.label}: ${c.detail}`).join("  ·  "),
+  };
+
+  const runtimeVerdict = {
+    state: (sloMinTokensPerSec === ""
+      ? "unknown"
+      : result.aggregateTokensPerSec >= sloMinTokensPerSec
+        ? "pass"
+        : "fail") as "pass" | "fail" | "unknown",
+    value: `${fmtTokens(result.aggregateTokensPerSec)} tok/s aggregate`,
+    detail: `${fmtTokens(result.decodeTokensPerSec)} tok/s per user · first answer ${fmtMs(result.firstAnswerLatencyMs)} · TTFT ${fmtMs(result.ttftMs)}`,
+  };
 
   const handleCopyMarkdown = async () => {
     const model = selectedModel;
@@ -851,6 +942,62 @@ export default function Home() {
 
                   <Separator />
 
+                  <div>
+                    <Label className="text-xs flex items-center gap-1">
+                      SLO targets
+                      <HelpIcon term="slo" />
+                    </Label>
+                    <p className="text-[10px] text-muted-foreground mt-0.5 mb-2">
+                      Optional ceilings. Set them and the Verdict panel tells you
+                      whether this configuration actually meets them.
+                    </p>
+                    <div className="grid grid-cols-3 gap-2">
+                      <div>
+                        <Label className="text-[10px] text-muted-foreground">Max TTFT (ms)</Label>
+                        <Input
+                          type="number"
+                          placeholder="e.g. 800"
+                          value={sloMaxTtftMs}
+                          onChange={(e) =>
+                            setSloMaxTtftMs(e.target.value === "" ? "" : Number(e.target.value))
+                          }
+                          className="mt-1"
+                        />
+                      </div>
+                      <div>
+                        <Label className="text-[10px] text-muted-foreground">Min tok/s</Label>
+                        <Input
+                          type="number"
+                          placeholder="e.g. 100"
+                          value={sloMinTokensPerSec}
+                          onChange={(e) =>
+                            setSloMinTokensPerSec(
+                              e.target.value === "" ? "" : Number(e.target.value),
+                            )
+                          }
+                          className="mt-1"
+                        />
+                      </div>
+                      <div>
+                        <Label className="text-[10px] text-muted-foreground">Max $/1M tokens</Label>
+                        <Input
+                          type="number"
+                          step="0.01"
+                          placeholder="e.g. 2.00"
+                          value={sloMaxCostPerMillion}
+                          onChange={(e) =>
+                            setSloMaxCostPerMillion(
+                              e.target.value === "" ? "" : Number(e.target.value),
+                            )
+                          }
+                          className="mt-1"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  <Separator />
+
                   <div className="flex items-center justify-between">
                     <div>
                       <Label className="text-xs flex items-center gap-1">
@@ -1022,6 +1169,39 @@ export default function Home() {
 
             {/* ===== RESULTS ===== */}
             <div className="lg:col-span-7 space-y-4">
+              <Card className="border-border/60 shadow-sm">
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-sm flex items-center gap-2">
+                    Verdict
+                    <HelpIcon term="verdict" />
+                  </CardTitle>
+                  <CardDescription className="text-xs">
+                    Fit, runtime and SLO are three different questions. Here are
+                    three different answers.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-2">
+                  <VerdictRow
+                    label="Fit"
+                    state={fitVerdict.state}
+                    value={fitVerdict.value}
+                    detail={fitVerdict.detail}
+                  />
+                  <VerdictRow
+                    label="Runtime"
+                    state={runtimeVerdict.state}
+                    value={runtimeVerdict.value}
+                    detail={runtimeVerdict.detail}
+                  />
+                  <VerdictRow
+                    label="SLO"
+                    state={sloVerdict.state}
+                    value={sloVerdict.value}
+                    detail={sloVerdict.detail}
+                  />
+                </CardContent>
+              </Card>
+
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                 <HeadlineCard
                   icon={<Gauge className="size-4" />}
@@ -1917,6 +2097,42 @@ function HeadlineCard({
         )}
       </CardContent>
     </Card>
+  );
+}
+
+function VerdictRow({
+  label,
+  state,
+  value,
+  detail,
+}: {
+  label: string;
+  state: "pass" | "fail" | "unknown";
+  value: string;
+  detail: string;
+}) {
+  const tone =
+    state === "pass"
+      ? "border-emerald-500/30 bg-emerald-500/5"
+      : state === "fail"
+        ? "border-amber-500/40 bg-amber-500/5"
+        : "border-border/60 bg-muted/20";
+  const valueTone =
+    state === "pass"
+      ? "text-emerald-600 dark:text-emerald-400"
+      : state === "fail"
+        ? "text-amber-600 dark:text-amber-400"
+        : "text-muted-foreground";
+  return (
+    <div className={`rounded-lg border px-3 py-2 ${tone}`}>
+      <div className="flex items-center justify-between gap-3">
+        <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+          {label}
+        </span>
+        <span className={`text-xs font-semibold text-right ${valueTone}`}>{value}</span>
+      </div>
+      <p className="text-[10px] text-muted-foreground mt-0.5">{detail}</p>
+    </div>
   );
 }
 
